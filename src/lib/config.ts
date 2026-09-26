@@ -26,7 +26,9 @@ const timezone = read('APP_TIMEZONE')
 
 export const config = {
   supabaseUrl: read('SUPABASE_URL'),
-  supabaseAnonKey: read('SUPABASE_ANON_KEY'),
+  // Publishable key (sb_publishable_...). SUPABASE_ANON_KEY se acepta para
+  // proyectos que todavía usan las keys legacy.
+  supabaseKey: read('SUPABASE_PUBLISHABLE_KEY') || read('SUPABASE_ANON_KEY'),
   appName: read('APP_NAME') || 'Flota Admin',
   logoUrl: read('APP_LOGO_URL') || '/logo.svg',
   primaryColor: read('APP_PRIMARY_COLOR'),
@@ -40,7 +42,7 @@ export const config = {
 // una pantalla de configuración en vez de fallar con errores de red.
 export const missingConfig: string[] = [
   !config.supabaseUrl && 'SUPABASE_URL',
-  !config.supabaseAnonKey && 'SUPABASE_ANON_KEY',
+  !config.supabaseKey && 'SUPABASE_PUBLISHABLE_KEY',
   !timezone && 'APP_TIMEZONE',
   timezone && !isValidTimeZone(timezone) && 'APP_TIMEZONE (zona horaria inválida)',
 ].filter((v): v is string => Boolean(v))

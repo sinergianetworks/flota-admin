@@ -8,9 +8,10 @@ set -eu
 
 TARGET="${ENV_CONFIG_PATH:-/usr/share/nginx/html/env-config.js}"
 
-# Variables expuestas al navegador. Solo valores públicos: la anon key de
-# Supabase está pensada para el cliente; NUNCA agregues la service_role key.
-VARS="SUPABASE_URL SUPABASE_ANON_KEY APP_NAME APP_LOGO_URL APP_PRIMARY_COLOR APP_TIMEZONE APP_CURRENCY"
+# Variables expuestas al navegador. Solo valores públicos: la publishable key
+# (o la anon key legacy) está pensada para el cliente. NUNCA agregues la secret
+# key ni la service_role key.
+VARS="SUPABASE_URL SUPABASE_PUBLISHABLE_KEY SUPABASE_ANON_KEY APP_NAME APP_LOGO_URL APP_PRIMARY_COLOR APP_TIMEZONE APP_CURRENCY"
 
 # Escapa un valor para usarlo dentro de una cadena JSON entre comillas dobles.
 json_escape() {

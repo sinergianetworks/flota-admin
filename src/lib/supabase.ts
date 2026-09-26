@@ -5,5 +5,5 @@ import { config } from './config'
 // lance al importar; main.tsx muestra la pantalla de configuración incompleta.
 export const supabase = createClient(
   config.supabaseUrl || 'http://localhost',
-  config.supabaseAnonKey || 'anon',
+  config.supabaseKey || 'sb_publishable_placeholder',
 )
