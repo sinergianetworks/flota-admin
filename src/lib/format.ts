@@ -2,12 +2,18 @@ import { config } from './config'
 
 const LOCALE = 'es'
 
+// En español, toLocaleString no agrupa los números de 4 cifras ("8901");
+// 'always' los muestra igual que el resto ("8.901").
+const GROUPING = { useGrouping: 'always' } as const
+
 export function formatKm(km: number, decimals = 0): string {
-  return `${km.toLocaleString(LOCALE, { maximumFractionDigits: decimals })} km`
+  return `${km.toLocaleString(LOCALE, { maximumFractionDigits: decimals, ...GROUPING })} km`
 }
 
 export function formatMoney(amount: number): string {
-  return `${config.currency}${amount.toLocaleString(LOCALE, { maximumFractionDigits: 2 })}`
+  // Enteros sin decimales ("$18"); el resto siempre con dos ("$62,40").
+  const decimals = Number.isInteger(amount) ? 0 : 2
+  return `${config.currency}${amount.toLocaleString(LOCALE, { minimumFractionDigits: decimals, maximumFractionDigits: decimals, ...GROUPING })}`
 }
 
 // Fecha YYYY-MM-DD de un instante en la zona horaria de la instalación.

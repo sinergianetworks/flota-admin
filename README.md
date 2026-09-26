@@ -26,9 +26,9 @@ Plataforma web para administrar una flota de vehículos: kilometraje, mantenimie
 - **Marca configurable:** nombre, logo y color de la empresa.
 - **Todo en español** y adaptado al teléfono.
 
-| Mapa de flota | Bitácora | Vista del conductor |
-|---|---|---|
-| ![Mapa](docs/capturas/mapa.png) | ![Bitácora](docs/capturas/bitacora.png) | ![Conductor](docs/capturas/conductor-movil.png) |
+| Bitácora | Vista del conductor (teléfono) |
+|---|---|
+| ![Bitácora](docs/capturas/bitacora.png) | <img src="docs/capturas/conductor-movil.png" alt="Vista del conductor" width="300"> |
 
 ## Arquitectura
 
