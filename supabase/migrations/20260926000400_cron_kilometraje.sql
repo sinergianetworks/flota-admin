@@ -14,8 +14,13 @@
 -- Mientras falten esos secretos, los jobs no hacen nada (solo un aviso).
 -- ─────────────────────────────────────────────────────────────
 
-create extension if not exists pg_cron;
-create extension if not exists pg_net;
+-- Instalación según la guía de Supabase Cron.
+create extension if not exists pg_cron with schema pg_catalog;
+grant usage on schema cron to postgres;
+grant all privileges on all tables in schema cron to postgres;
+
+-- pg_net crea su propio schema "net".
+create extension if not exists pg_net with schema extensions;
 
 -- Llama a sync-mileage para 'today' o 'yesterday' (resueltos en APP_TIMEZONE
 -- por la propia función). Devuelve el id de la petición de pg_net.
