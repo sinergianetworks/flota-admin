@@ -1152,6 +1152,7 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
   const one = (row: unknown) => single ? (row ? Response.json(row) : new Response(null, { status: 406 })) : Response.json(row ? [row] : [])
 
   if (url.pathname === '/resend/emails') {
+    assertEquals(req.headers.get('authorization'), 'Bearer re_test')
     if (state.resendFails) return new Response('{"message":"dominio no verificado"}', { status: 403 })
     state.emails.push(await req.json())
     return Response.json({ id: 'email_1' })
@@ -1380,19 +1381,21 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
       recipients = (admins ?? []).map(a => a.email).filter(Boolean)
     }
 
-    // Errores ANTES de que Resend acepte el correo (no enviado): el día queda en
-    // 'error' y la hora siguiente reintenta. Un timeout o corte de red durante el
-    // envío es "posiblemente enviado": el día queda en 'sending' y no se reintenta,
-    // para no duplicar el correo.
+    // Si falla antes de llamar a Resend, o Resend responde con error HTTP, el
+    // correo NO salió: el día queda en 'error' y la hora siguiente reintenta.
+    // Un timeout o corte de red DURANTE el envío es "posiblemente enviado": el día
+    // queda en 'sending' y no se reintenta, para no duplicar el correo.
+    let attempted = false
     try {
       if (recipients.length === 0) throw new HttpError(500, 'No hay administradores activos con correo.')
       const cfg = emailConfig()
       const email = buildReminderEmail(items, { appName: cfg.appName, appUrl: cfg.appUrl, today })
+      attempted = true
       await sendEmail(cfg, { to: recipients, ...email })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      const notSent = e instanceof ResendHttpError || e instanceof HttpError
-      if (!test) await log(notSent ? 'error' : 'sending', recipients, items.length, message)
+      const possiblySent = attempted && !(e instanceof ResendHttpError)
+      if (!test) await log(possiblySent ? 'sending' : 'error', recipients, items.length, message)
       throw new HttpError(502, message)
     }
 
