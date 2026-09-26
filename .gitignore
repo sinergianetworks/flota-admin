@@ -13,9 +13,6 @@ dist-ssr/
 supabase/.temp/
 supabase/.branches/
 
-# Config de runtime generada al arrancar el contenedor
-public/env-config.js
-
 # Logs
 *.log
 npm-debug.log*
