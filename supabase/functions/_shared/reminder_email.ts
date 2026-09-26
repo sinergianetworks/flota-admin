@@ -83,7 +83,7 @@ export function buildReminderEmail(items: ReminderItem[], opts: EmailOptions): E
     : section('Vencidos', '#dc2626', overdue) + section('Próximos', '#b45309', upcoming)
 
   const html = `<!doctype html>
-<html lang="es"><body style="margin:0;padding:24px;background:#f9fafb;font-family:Arial,Helvetica,sans-serif">
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:24px;background:#f9fafb;font-family:Arial,Helvetica,sans-serif">
   <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:24px">
     <h1 style="margin:0 0 4px;font-size:18px;color:#111827">${esc(opts.appName)}</h1>
     <p style="margin:0;font-size:13px;color:#6b7280">Vencimientos al ${date(opts.today)}</p>

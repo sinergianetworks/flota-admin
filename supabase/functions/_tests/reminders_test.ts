@@ -63,6 +63,33 @@ Deno.test('vehículos inactivos no avisan', () => {
   assertEquals(items, [])
 })
 
+Deno.test('mantenimiento por km: redondea a entero (strings incluidos)', () => {
+  const items = computeReminders(
+    [v({ id: 'a', next_maintenance_km: '10000' })],
+    [{ vehicle_id: 'a', odometer_km: '9999.7', has_data: true }], S, TODAY)
+  assertEquals(items.map(i => [i.remaining, i.overdue]), [[0, true]])
+})
+
+Deno.test('mantenimiento por km: redondea hacia abajo cuando falta menos de 1 km entero', () => {
+  const items = computeReminders(
+    [v({ id: 'a', next_maintenance_km: '10000' })],
+    [{ vehicle_id: 'a', odometer_km: '9999.4', has_data: true }], S, TODAY)
+  assertEquals(items.map(i => [i.remaining, i.overdue]), [[1, false]])
+})
+
+Deno.test('mantenimiento por km: next_maintenance_km 0 no avisa', () => {
+  const items = computeReminders([v({ id: 'a', next_maintenance_km: 0 })], [odo('a', 0)], S, TODAY)
+  assertEquals(items, [])
+})
+
+Deno.test('orden: mismo remaining y mismo tipo, por nombre', () => {
+  const items = computeReminders([
+    v({ id: 'z', name: 'Zeta', insurance_expiry: '2026-09-27' }),
+    v({ id: 'a', name: 'Alfa', insurance_expiry: '2026-09-27' }),
+  ], [], S, TODAY)
+  assertEquals(items.map(i => i.vehicleId), ['a', 'z'])
+})
+
 Deno.test('orden: vencidos primero; dentro de cada grupo, seguro, fecha, km y lo más urgente antes', () => {
   const items = computeReminders([
     v({ id: 'x', next_maintenance_km: 10500, insurance_expiry: '2026-10-10', next_maintenance_date: '2026-09-01' }),

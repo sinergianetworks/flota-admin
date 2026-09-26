@@ -52,3 +52,24 @@ Deno.test('escapa HTML de los datos', () => {
   assert(!e.html.includes('<script>'))
   assertStringIncludes(e.html, '&lt;script&gt;')
 })
+
+Deno.test('html: incluye meta charset y viewport en el head', () => {
+  const e = buildReminderEmail([], OPTS)
+  assertStringIncludes(e.html, '<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>')
+})
+
+Deno.test('texto plano: vehículo sin placa muestra solo el nombre, sin paréntesis', () => {
+  const e = buildReminderEmail([{ vehicleId: '2', vehicleName: 'Camioneta', plate: null, kind: 'insurance', remaining: 1, overdue: false, dueDate: '2026-09-27' }], OPTS)
+  assertStringIncludes(e.text, '- Camioneta · Seguro: vence en 1 día (27/09/2026)')
+  assert(!e.text.includes('Camioneta ('))
+})
+
+Deno.test('html: escapa placa y appName con etiquetas', () => {
+  const e = buildReminderEmail(
+    [{ ...base, plate: '<b>AB-12</b>', kind: 'insurance', remaining: 1, overdue: false, dueDate: '2026-09-27' }],
+    { ...OPTS, appName: '<b>Transportes</b>' })
+  assert(!e.html.includes('<b>AB-12</b>'))
+  assert(!e.html.includes('<b>Transportes</b>'))
+  assertStringIncludes(e.html, '&lt;b&gt;AB-12&lt;/b&gt;')
+  assertStringIncludes(e.html, '&lt;b&gt;Transportes&lt;/b&gt;')
+})

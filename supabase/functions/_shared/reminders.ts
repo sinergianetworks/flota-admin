@@ -56,9 +56,9 @@ export function computeReminders(
 
     if (v.next_maintenance_km != null) {
       const odo = odoById.get(v.id)
-      if (odo?.has_data) {
-        const dueKm = Number(v.next_maintenance_km)
-        const remaining = Math.round((dueKm - Number(odo.odometer_km)) * 100) / 100
+      const dueKm = Number(v.next_maintenance_km)
+      if (odo?.has_data && Number.isFinite(dueKm) && dueKm > 0) {
+        const remaining = Math.round(dueKm - Number(odo.odometer_km))
         if (remaining <= settings.maintenance_km_threshold) {
           items.push({ ...base, kind: 'maintenance_km', remaining, overdue: remaining <= 0, dueKm })
         }
