@@ -56,6 +56,6 @@ export async function sendEmail(cfg: EmailConfig, email: OutgoingEmail): Promise
     signal: AbortSignal.timeout(15_000),
   })
   if (!res.ok) {
-    throw new ResendHttpError(`Resend (${res.status}): ${(await res.text()).slice(0, 300)}`)
+    throw new ResendHttpError(`Resend (${res.status}): ${(await res.text().catch(() => '')).slice(0, 300)}`)
   }
 }

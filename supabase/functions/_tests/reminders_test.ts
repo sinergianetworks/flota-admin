@@ -70,7 +70,7 @@ Deno.test('mantenimiento por km: redondea a entero (strings incluidos)', () => {
   assertEquals(items.map(i => [i.remaining, i.overdue]), [[0, true]])
 })
 
-Deno.test('mantenimiento por km: redondea hacia abajo cuando falta menos de 1 km entero', () => {
+Deno.test('mantenimiento por km: redondea hacia arriba cuando faltan 0,6 km', () => {
   const items = computeReminders(
     [v({ id: 'a', next_maintenance_km: '10000' })],
     [{ vehicle_id: 'a', odometer_km: '9999.4', has_data: true }], S, TODAY)
