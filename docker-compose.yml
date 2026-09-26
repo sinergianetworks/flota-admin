@@ -1,0 +1,17 @@
+# Ejemplo de despliegue del frontend con Docker Compose.
+#
+#   cp .env.example .env      # completa los valores
+#   docker compose up -d --build
+#
+# El backend (base de datos, auth, edge functions) vive en Supabase Cloud;
+# este contenedor solo sirve la aplicación web.
+services:
+  flota-admin:
+    build: .
+    # O usa una imagen ya construida en lugar de `build`:
+    # image: ghcr.io/sinergianetworks/flota-admin:latest
+    container_name: flota-admin
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${FLOTA_PORT:-8080}:80"

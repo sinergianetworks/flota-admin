@@ -1,0 +1,80 @@
+# Construye la imagen del frontend.
+#  · push a main / pull request → solo construye (valida el Dockerfile)
+#  · tag v*                     → construye y publica en GHCR
+#      ghcr.io/<owner>/flota-admin:<versión> y :latest
+name: Imagen Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login a GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Etiquetas
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/flota-admin
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+
+      - name: Build (y push si es un tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          load: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Prueba de humo: arranca el contenedor con variables de ejemplo y
+      # verifica el healthcheck, el config de runtime y el fallback SPA.
+      - name: Prueba de humo
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          IMAGE=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          docker run -d --name flota -p 8080:80 \
+            -e SUPABASE_URL=https://ejemplo.supabase.co \
+            -e SUPABASE_PUBLISHABLE_KEY=sb_publishable_prueba \
+            -e APP_TIMEZONE=America/Mexico_City \
+            -e APP_NAME='Flota "Prueba"' \
+            "$IMAGE"
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          echo "--- env-config.js"
+          curl -fsS http://127.0.0.1:8080/env-config.js | tee /tmp/env.js
+          grep -q '"SUPABASE_URL": "https://ejemplo.supabase.co"' /tmp/env.js
+          grep -q 'Flota \\"Prueba\\"' /tmp/env.js
+          curl -fsSI http://127.0.0.1:8080/env-config.js | grep -i 'cache-control: no-store'
+          echo "--- fallback SPA"
+          curl -fsS http://127.0.0.1:8080/vehiculos | grep -q '<div id="root">'
+          curl -fsSI http://127.0.0.1:8080/vehiculos | grep -i 'x-content-type-options: nosniff'
+          echo "--- assets con caché larga"
+          ASSET=$(curl -fsS http://127.0.0.1:8080/ | grep -o '/assets/[^"]*\.js' | head -n1)
+          curl -fsSI "http://127.0.0.1:8080$ASSET" | grep -i 'immutable'
+          docker logs flota 2>&1 | grep 'env-config'
