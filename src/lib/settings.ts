@@ -57,6 +57,13 @@ export async function fetchFleetSettingsStrict(): Promise<FleetSettings> {
   return settings
 }
 
+// Fija la caché con un valor ya conocido (p. ej. tras guardar cuando la
+// relectura falla), para que las tarjetas no se queden con los umbrales viejos.
+export function setFleetSettingsCache(s: FleetSettings): void {
+  resolved = s
+  cached = Promise.resolve(s)
+}
+
 export function useFleetSettings(): FleetSettings {
   const [settings, setSettings] = useState<FleetSettings>(() => resolved ?? DEFAULT_SETTINGS)
   useEffect(() => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Settings, Loader2, Mail } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
-import { DEFAULT_SETTINGS, fetchFleetSettingsStrict, type FleetSettings } from '@/lib/settings'
+import { DEFAULT_SETTINGS, fetchFleetSettingsStrict, setFleetSettingsCache, type FleetSettings } from '@/lib/settings'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -96,8 +96,10 @@ export default function SettingsPage() {
       refreshed = await fetchFleetSettingsStrict()
     } catch {
       // La escritura sí funcionó (hubo fila afectada); si la relectura falla,
-      // usamos igual los valores recién guardados en vez de mostrar error.
+      // usamos igual los valores recién guardados en vez de mostrar error, y
+      // fijamos la caché para que las tarjetas no queden con los umbrales viejos.
       refreshed = { ...values, email_reminders_enabled: enabled }
+      setFleetSettingsCache(refreshed)
     }
     setLoaded(refreshed)
     setFields(toFields(refreshed))
@@ -199,9 +201,9 @@ export default function SettingsPage() {
                 <span className="text-sm">
                   Enviar un resumen diario de vencimientos
                   <span className="block text-xs text-muted-foreground">
-                    Se envían a las 7:00 (hora local de la instalación) a todos los administradores activos, y se
-                    repiten cada día hasta que se actualice el dato. Si hoy ya se envió o no había vencimientos, los
-                    cambios se aplican desde mañana.
+                    Se envía a las 7:00 (hora local de la instalación) a todos los administradores activos y se
+                    repite cada día hasta que se actualice el dato. Los cambios hechos después de las 7:00 se
+                    aplican desde mañana.
                   </span>
                 </span>
               </label>
@@ -230,7 +232,7 @@ export default function SettingsPage() {
                 {message.text}
               </p>
             )}
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving || !dirty}>
               {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Guardando...</> : 'Guardar'}
             </Button>
           </div>
