@@ -421,3 +421,9 @@ enabled = true
 # legacy. Cada función valida la sesión (o el secreto del cron) en código.
 [functions.create-user]
 verify_jwt = false
+
+[functions.gps-status]
+verify_jwt = false
+
+[functions.sync-mileage]
+verify_jwt = false
