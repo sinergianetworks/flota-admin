@@ -1,0 +1,27 @@
+# Dependencias y builds
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Variables de entorno: nunca se versionan, salvo el ejemplo
+.env
+.env.*
+!.env.example
+
+# Supabase CLI (estado local)
+supabase/.temp/
+supabase/.branches/
+
+# Config de runtime generada al arrancar el contenedor
+public/env-config.js
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / SO
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
