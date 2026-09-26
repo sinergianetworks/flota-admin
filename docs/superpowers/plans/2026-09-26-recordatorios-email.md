@@ -1252,6 +1252,19 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.log.get('2026-09-26')?.status, 'sent')
     })
 
+    await t.step('corte de red al enviar: queda en sending y no se reintenta', async () => {
+      resetState()
+      // Puerto cerrado: la conexión se rechaza (error de red, no respuesta HTTP).
+      Deno.env.set('RESEND_API_URL', 'http://127.0.0.1:1/emails')
+      const res = await at(SIETE)(cron())
+      Deno.env.set('RESEND_API_URL', `${BASE}/resend/emails`)
+      assertEquals(res.status, 502)
+      assertEquals(state.log.get('2026-09-26')?.status, 'sending')
+      const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
+      assertEquals(retry.skipped, 'already_sent')
+      assertEquals(state.emails.length, 0)
+    })
+
     await t.step('secreto equivocado y sin sesión: 401', async () => {
       const req = new Request('http://f', { method: 'POST', headers: { 'x-cron-secret': 'otro' }, body: '{}' })
       assertEquals((await at(SIETE)(req)).status, 401)
@@ -1295,11 +1308,11 @@ import { isCronRequest } from '../_shared/cron.ts'
 import { appTimeZone, dateInTz, hourInTz } from '../_shared/time.ts'
 import { computeReminders, type ReminderSettings } from '../_shared/reminders.ts'
 import { buildReminderEmail } from '../_shared/reminder_email.ts'
-import { emailConfig, sendEmail } from '../_shared/resend.ts'
+import { emailConfig, sendEmail, ResendHttpError } from '../_shared/resend.ts'
 
 const SEND_HOUR = 7
 
-type Status = 'sent' | 'nothing_to_send' | 'disabled' | 'error'  // 'sending' lo pone flota_claim_reminder_day
+type Status = 'sending' | 'sent' | 'nothing_to_send' | 'disabled' | 'error'
 
 interface Deps {
   now: () => Date
@@ -1367,14 +1380,19 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
       recipients = (admins ?? []).map(a => a.email).filter(Boolean)
     }
 
+    // Errores ANTES de que Resend acepte el correo (no enviado): el día queda en
+    // 'error' y la hora siguiente reintenta. Un timeout o corte de red durante el
+    // envío es "posiblemente enviado": el día queda en 'sending' y no se reintenta,
+    // para no duplicar el correo.
     try {
-      if (recipients.length === 0) throw new Error('No hay administradores activos con correo.')
+      if (recipients.length === 0) throw new HttpError(500, 'No hay administradores activos con correo.')
       const cfg = emailConfig()
       const email = buildReminderEmail(items, { appName: cfg.appName, appUrl: cfg.appUrl, today })
       await sendEmail(cfg, { to: recipients, ...email })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      if (!test) await log('error', recipients, items.length, message)
+      const notSent = e instanceof ResendHttpError || e instanceof HttpError
+      if (!test) await log(notSent ? 'error' : 'sending', recipients, items.length, message)
       throw new HttpError(502, message)
     }
 
