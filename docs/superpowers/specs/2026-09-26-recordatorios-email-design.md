@@ -46,11 +46,11 @@ El aviso se repite cada día mientras la condición siga, y deja de aparecer sol
 |---|---|
 | `id` | `uuid` PK |
 | `local_date` | `date`, **unique** (un envío programado por día) |
-| `status` | `text`, `check in ('sent', 'nothing_to_send', 'disabled', 'error')` |
+| `status` | `text`, `check in ('sending', 'sent', 'nothing_to_send', 'disabled', 'error')` |
 | `recipients` | `text[]` |
 | `item_count` | `integer` |
 | `error` | `text` |
-| `created_at` | `timestamptz` |
+| `created_at`, `updated_at` | `timestamptz` (`updated_at` se actualiza con un trigger) |
 
 - RLS activada y sin políticas: solo la usa el service role.
 - Los envíos de prueba **no** se registran aquí, así que no bloquean el envío programado.
@@ -105,7 +105,9 @@ Reglas, solo para vehículos **activos**:
 
 1. **Programado.** Lo llama pg_cron con el header `x-cron-secret` igual a `SYNC_CRON_SECRET`, con el body `{}`.
    1. Si la hora local en `APP_TIMEZONE` es anterior a las 7:00, responde `{skipped: 'hour'}`.
-   2. Si ya hay una fila en `reminder_log` para hoy con un estado distinto de `error`, responde `{skipped: 'already_sent'}`. Así se envía una sola vez, en la primera ejecución desde las 7:00 (la de las 7:10), y si esa falla se reintenta a las 8:10, 9:10, etc.
+   2. Reclama el día con `flota_claim_reminder_day(today)`: un insert o update atómico que pone la fila en `sending` y devuelve `true` solo si el día no existía o estaba en `error`. Si devuelve `false`, responde `{skipped: 'already_sent'}`.
+      - Así se envía una sola vez, en la primera ejecución desde las 7:00 (la de las 7:10), y si esa falla se reintenta a las 8:10, 9:10, etc.
+      - Un `sending` colgado (la función murió después de reclamar el día) cuenta como "posiblemente enviado" y **no** se reintenta ese día, para no duplicar el correo.
    3. Si `email_reminders_enabled = false`, registra `disabled` y termina.
    4. Calcula los avisos. Si no hay ninguno, registra `nothing_to_send` y no envía correo.
    5. Si hay avisos, envía un correo a todos los admins activos (varios destinatarios en `to`) y registra `sent` o `error`.

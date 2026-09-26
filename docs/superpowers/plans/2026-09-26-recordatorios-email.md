@@ -1168,11 +1168,15 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
     case '/rest/v1/profiles':
       if (url.searchParams.get('id') === 'eq.u-admin') return one({ role: 'admin', active: true })
       return Response.json(state.admins)
+    case '/rest/v1/rpc/flota_claim_reminder_day': {
+      // Misma semántica que la función SQL: reclama si no existe o está en error.
+      const { p_date } = await req.json()
+      const row = state.log.get(p_date)
+      if (row && row.status !== 'error') return Response.json(false)
+      state.log.set(p_date, { local_date: p_date, status: 'sending' })
+      return Response.json(true)
+    }
     case '/rest/v1/reminder_log': {
-      if (req.method === 'GET') {
-        const date = (url.searchParams.get('local_date') ?? '').replace('eq.', '')
-        return one(state.log.get(date) ?? null)
-      }
       const body = await req.json()
       for (const row of Array.isArray(body) ? body : [body]) state.log.set(row.local_date, row)
       return new Response(null, { status: 201 })
@@ -1295,7 +1299,7 @@ import { emailConfig, sendEmail } from '../_shared/resend.ts'
 
 const SEND_HOUR = 7
 
-type Status = 'sent' | 'nothing_to_send' | 'disabled' | 'error'
+type Status = 'sent' | 'nothing_to_send' | 'disabled' | 'error'  // 'sending' lo pone flota_claim_reminder_day
 
 interface Deps {
   now: () => Date
@@ -1324,8 +1328,11 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
 
     if (!test) {
       if (hourInTz(now, tz) < SEND_HOUR) return json({ skipped: 'hour', today })
-      const { data: done } = await db.from('reminder_log').select('status').eq('local_date', today).maybeSingle()
-      if (done && done.status !== 'error') return json({ skipped: 'already_sent', today })
+      // Reclama el día de forma atómica: true solo si no existía o quedó en error.
+      // Un 'sending' colgado cuenta como "posiblemente enviado" y no se reintenta.
+      const { data: claimed, error: cErr } = await db.rpc('flota_claim_reminder_day', { p_date: today })
+      if (cErr) throw new HttpError(500, `No se pudo reservar el envío del día: ${cErr.message}`)
+      if (!claimed) return json({ skipped: 'already_sent', today })
     }
 
     const { data: settingsRow, error: sErr } = await db
