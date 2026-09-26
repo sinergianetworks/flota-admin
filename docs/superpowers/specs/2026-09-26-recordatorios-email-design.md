@@ -97,7 +97,7 @@ Reglas, solo para vehículos **activos**:
 - Un vehículo sin GPS y sin odómetro (`has_data = false`) no genera aviso de mantenimiento por km.
 - "Hoy" es la fecha en `APP_TIMEZONE`. Los días son diferencias de calendario, sin horas.
 - Alineado con la tarjeta: el seguro que vence hoy (0 días) cuenta como **vencido**, igual que en la UI.
-- Orden del resultado: primero los vencidos (los más atrasados antes) y luego los próximos (los más cercanos antes).
+- Orden del resultado: primero los vencidos y luego los próximos. Dentro de cada grupo, por tipo (seguro, mantenimiento por fecha, mantenimiento por km) y del más urgente al menos urgente; a igualdad, por nombre del vehículo.
 
 ## Edge function `send-reminders`
 
