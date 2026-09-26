@@ -78,3 +78,16 @@ export function resolveDate(value: string | undefined, tz: string, now = new Dat
   if (!isValidDate(value)) throw new HttpError(400, `Fecha inválida: ${value} (usa YYYY-MM-DD, "today" o "yesterday").`)
   return value
 }
+
+// Hora (0-23) de un instante vista desde la zona `tz`.
+export function hourInTz(instant: Date, tz: string): number {
+  const hour = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' })
+    .formatToParts(instant)
+    .find(p => p.type === 'hour')?.value
+  return Number(hour)
+}
+
+// Días de calendario de `from` a `to` (YYYY-MM-DD). Negativo si `to` es anterior.
+export function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+}

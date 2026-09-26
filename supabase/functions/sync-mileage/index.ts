@@ -12,28 +12,17 @@ import { serve, json, readJson, HttpError } from '../_shared/http.ts'
 import { adminClient, requireAdmin } from '../_shared/supabase.ts'
 import { appTimeZone, dayRangeUtc, resolveDate } from '../_shared/time.ts'
 import { getProvider } from '../_shared/gps/providers/index.ts'
+import { isCronRequest } from '../_shared/cron.ts'
 
 interface Body {
   date?: string
   vehicle_id?: string
 }
 
-// Comparación en tiempo constante para no filtrar el secreto por tiempos.
-function safeEqual(a: string, b: string): boolean {
-  const ea = new TextEncoder().encode(a)
-  const eb = new TextEncoder().encode(b)
-  if (ea.length !== eb.length) return false
-  let diff = 0
-  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i]
-  return diff === 0
-}
-
 serve(async (req) => {
   const admin = adminClient()
 
-  const cronSecret = (Deno.env.get('SYNC_CRON_SECRET') ?? '').trim()
-  const sentSecret = req.headers.get('x-cron-secret') ?? ''
-  const fromCron = cronSecret.length >= 16 && safeEqual(sentSecret, cronSecret)
+  const fromCron = isCronRequest(req)
   if (!fromCron) await requireAdmin(req, admin)
 
   const tz = appTimeZone()

@@ -34,10 +34,12 @@ export async function readJson<T = Record<string, unknown>>(req: Request): Promi
   }
 }
 
+type Handler = (req: Request) => Promise<Response>
+
 // Envuelve un handler: responde el preflight CORS, acepta solo POST y
-// traduce errores a JSON { error }.
-export function serve(handler: (req: Request) => Promise<Response>) {
-  Deno.serve(async (req) => {
+// traduce errores a JSON { error }. Separado de serve() para poder testearlo.
+export function withErrors(handler: Handler): Handler {
+  return async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
     if (req.method !== 'POST') return errorResponse('Método no permitido', 405)
     try {
@@ -47,5 +49,9 @@ export function serve(handler: (req: Request) => Promise<Response>) {
       console.error(err)
       return errorResponse('Error interno del servidor', 500)
     }
-  })
+  }
+}
+
+export function serve(handler: Handler) {
+  Deno.serve(withErrors(handler))
 }
