@@ -9,7 +9,7 @@ import { json, readJson, HttpError } from '../_shared/http.ts'
 import { adminClient, requireAdmin } from '../_shared/supabase.ts'
 import { isCronRequest } from '../_shared/cron.ts'
 import { appTimeZone, dateInTz, hourInTz } from '../_shared/time.ts'
-import { computeReminders, type ReminderSettings } from '../_shared/reminders.ts'
+import { computeReminders, type ReminderItem, type ReminderSettings } from '../_shared/reminders.ts'
 import { buildReminderEmail } from '../_shared/reminder_email.ts'
 import { emailConfig, sendEmail, ResendHttpError } from '../_shared/resend.ts'
 
@@ -34,12 +34,24 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
     const now = deps.now()
     const today = dateInTz(now, tz)
 
+    // Registra el resultado del día. Lanza si falla, para que se trate como
+    // cualquier otro error del paso (se relanza y la hora siguiente reintenta).
     const log = async (status: Status, recipients: string[], itemCount: number, error: string | null = null) => {
       const { error: e } = await db.from('reminder_log').upsert(
         { local_date: today, status, recipients, item_count: itemCount, error },
         { onConflict: 'local_date' },
       )
-      if (e) console.error('send-reminders: no se pudo registrar el envío', e.message)
+      if (e) throw new HttpError(500, `No se pudo registrar el envío: ${e.message}`)
+    }
+    // Variante "mejor esfuerzo": para el registro final de éxito, donde una
+    // falla en el propio registro no debe convertirse en un reintento (el
+    // correo ya salió y reintentar lo duplicaría).
+    const logBestEffort = async (status: Status, recipients: string[], itemCount: number, error: string | null = null) => {
+      try {
+        await log(status, recipients, itemCount, error)
+      } catch (e) {
+        console.error('send-reminders: no se pudo registrar el envío', e instanceof Error ? e.message : e)
+      }
     }
 
     if (!test) {
@@ -51,57 +63,68 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
       if (!claimed) return json({ skipped: 'already_sent', today })
     }
 
-    const { data: settingsRow, error: sErr } = await db
-      .from('fleet_settings')
-      .select('maintenance_km_threshold, maintenance_days_threshold, insurance_days_threshold, email_reminders_enabled')
-      .single()
-    if (sErr || !settingsRow) throw new HttpError(500, `No se pudo leer la configuración: ${sErr?.message ?? 'sin fila'}`)
-
-    if (!test && !settingsRow.email_reminders_enabled) {
-      await log('disabled', [], 0)
-      return json({ status: 'disabled', today })
-    }
-
-    const [{ data: vehicles, error: vErr }, { data: odometers, error: oErr }] = await Promise.all([
-      db.from('vehicles').select('id, name, plate, active, next_maintenance_km, next_maintenance_date, insurance_expiry').eq('active', true),
-      db.from('vehicle_odometer').select('vehicle_id, odometer_km, has_data'),
-    ])
-    if (vErr || oErr) throw new HttpError(500, (vErr ?? oErr)!.message)
-
-    const items = computeReminders(vehicles ?? [], odometers ?? [], settingsRow as ReminderSettings, today)
-
-    if (!test && items.length === 0) {
-      await log('nothing_to_send', [], 0)
-      return json({ status: 'nothing_to_send', today })
-    }
-
-    let recipients: string[]
-    if (test) {
-      recipients = caller?.user.email ? [caller.user.email] : []
-    } else {
-      const { data: admins } = await db.from('profiles').select('email').eq('role', 'admin').eq('active', true)
-      recipients = (admins ?? []).map(a => a.email).filter(Boolean)
-    }
-
-    // Si falla antes de llamar a Resend, o Resend responde con error HTTP, el
-    // correo NO salió: el día queda en 'error' y la hora siguiente reintenta.
-    // Un timeout o corte de red DURANTE el envío es "posiblemente enviado": el día
-    // queda en 'sending' y no se reintenta, para no duplicar el correo.
+    // A partir de aquí (modo programado) el día quedó en 'sending'. Cualquier
+    // falla antes de intentar el envío (leer configuración, vehículos,
+    // odómetros, administradores, o registrar 'disabled'/'nothing_to_send')
+    // debe quedar como 'error' para que la hora siguiente reintente. Solo un
+    // envío efectivamente intentado (y no rechazado por Resend) deja el día
+    // en 'sending', para no duplicar el correo.
     let attempted = false
+    let items: ReminderItem[] = []
+    let recipients: string[] = []
     try {
-      if (recipients.length === 0) throw new HttpError(500, 'No hay administradores activos con correo.')
+      const { data: settingsRow, error: sErr } = await db
+        .from('fleet_settings')
+        .select('maintenance_km_threshold, maintenance_days_threshold, insurance_days_threshold, email_reminders_enabled')
+        .single()
+      if (sErr || !settingsRow) throw new HttpError(500, `No se pudo leer la configuración: ${sErr?.message ?? 'sin fila'}`)
+
+      if (!test && !settingsRow.email_reminders_enabled) {
+        await log('disabled', [], 0)
+        return json({ status: 'disabled', today })
+      }
+
+      const [{ data: vehicles, error: vErr }, { data: odometers, error: oErr }] = await Promise.all([
+        db.from('vehicles').select('id, name, plate, active, next_maintenance_km, next_maintenance_date, insurance_expiry').eq('active', true),
+        db.from('vehicle_odometer').select('vehicle_id, odometer_km, has_data'),
+      ])
+      if (vErr || oErr) throw new HttpError(500, (vErr ?? oErr)!.message)
+
+      items = computeReminders(vehicles ?? [], odometers ?? [], settingsRow as ReminderSettings, today)
+
+      if (!test && items.length === 0) {
+        await log('nothing_to_send', [], 0)
+        return json({ status: 'nothing_to_send', today })
+      }
+
+      if (test) {
+        if (!caller?.user.email) throw new HttpError(400, 'Tu usuario no tiene correo; no se puede enviar la prueba.')
+        recipients = [caller.user.email]
+      } else {
+        const { data: admins, error: aErr } = await db.from('profiles').select('email').eq('role', 'admin').eq('active', true)
+        if (aErr) throw new HttpError(500, `No se pudo leer los administradores: ${aErr.message}`)
+        recipients = (admins ?? []).map(a => a.email).filter(Boolean)
+        if (recipients.length === 0) throw new HttpError(500, 'No hay administradores activos con correo.')
+      }
+
+      // Si falla antes de llamar a Resend, o Resend responde con error HTTP, el
+      // correo NO salió: el día queda en 'error' y la hora siguiente reintenta.
+      // Un timeout o corte de red DURANTE el envío es "posiblemente enviado": el
+      // día queda en 'sending' y no se reintenta, para no duplicar el correo.
       const cfg = emailConfig()
       const email = buildReminderEmail(items, { appName: cfg.appName, appUrl: cfg.appUrl, today })
       attempted = true
       await sendEmail(cfg, { to: recipients, ...email })
+
+      if (!test) await logBestEffort('sent', recipients, items.length)
+      return json({ status: 'sent', items: items.length, recipients: recipients.length, test, today })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       const possiblySent = attempted && !(e instanceof ResendHttpError)
-      if (!test) await log(possiblySent ? 'sending' : 'error', recipients, items.length, message)
+      if (!test) await logBestEffort(possiblySent ? 'sending' : 'error', recipients, items.length, message)
+      if (possiblySent) throw new HttpError(502, message)
+      if (e instanceof HttpError) throw e
       throw new HttpError(502, message)
     }
-
-    if (!test) await log('sent', recipients, items.length)
-    return json({ status: 'sent', items: items.length, recipients: recipients.length, test, today })
   }
 }
