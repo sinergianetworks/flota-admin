@@ -8,6 +8,8 @@ export interface Odometer {
   // 'manual': mayor valor entre el odómetro base y la última lectura de la bitácora.
   source: 'gps' | 'manual'
   hasData: boolean
+  // true si el valor mostrado sale de una lectura de la bitácora (no del odómetro base).
+  fromLog: boolean
 }
 
 // Calcula el odómetro mostrado. `refreshKey` fuerza a recalcular (p. ej. tras
@@ -50,7 +52,12 @@ export function useOdometer(vehicle: Vehicle, refreshKey: number): Odometer {
   const value = extra?.key === key ? extra.value : null
 
   if (hasGps) {
-    return { km: base + (value ?? 0), source: 'gps', hasData: value !== null || base > 0 }
+    return { km: base + (value ?? 0), source: 'gps', hasData: value !== null || base > 0, fromLog: false }
   }
-  return { km: Math.max(base, value ?? 0), source: 'manual', hasData: value !== null || base > 0 }
+  return {
+    km: Math.max(base, value ?? 0),
+    source: 'manual',
+    hasData: value !== null || base > 0,
+    fromLog: value !== null && value > base,
+  }
 }

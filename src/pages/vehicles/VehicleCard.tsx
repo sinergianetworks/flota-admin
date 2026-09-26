@@ -254,7 +254,7 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
                     : 'text-sm font-[500] text-muted-foreground'}>
                     {odometer.hasData ? formatKm(odometer.km) : hasGps ? 'Sin datos' : '— km'}
                   </span>
-                  {odometer.hasData && odometer.source === 'manual' && (
+                  {odometer.fromLog && (
                     <span className="text-[11px] text-muted-foreground">(bitácora)</span>
                   )}
                   {canManage && (

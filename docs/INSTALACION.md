@@ -54,9 +54,11 @@ npx supabase@latest link --project-ref <tu-project-ref>
 npx supabase@latest db push
 ```
 
-- `login` abre el navegador para autorizar el CLI.
-- `link` pide la contraseña de la base de datos del paso 1.
+- `login` abre el navegador para autorizar el CLI. Si ya lo usaste antes en esta computadora, puedes omitirlo.
+- `link` vincula la carpeta al proyecto. Según la versión del CLI puede pedir la contraseña de la base de datos del paso 1; las versiones recientes se conectan por la API y no la piden.
 - `db push` aplica las migraciones de `supabase/migrations/`. Te muestra la lista y te pide confirmar.
+
+> Antes de `db push`, comprueba que el proyecto vinculado es el correcto: `cat supabase/.temp/project-ref` debe mostrar tu project ref. Si en tu cuenta hay otros proyectos, un `link` equivocado aplicaría las migraciones en el proyecto que no es.
 
 La base queda con:
 
