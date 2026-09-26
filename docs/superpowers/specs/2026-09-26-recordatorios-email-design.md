@@ -114,11 +114,13 @@ Reglas, solo para vehículos **activos**:
 2. **Prueba.** Un admin con sesión llama con `{test: true}`.
    - Envía los avisos de hoy **solo al admin que llama**, aunque no haya ninguno (en ese caso, un correo que lo indica).
    - Ignora la hora, el interruptor de activación y el registro.
-   - Responde `{sent: true, items: n}` o el error de Resend.
+   - Responde `{status: 'sent', items: n, recipients: 1, test: true, today}`, o el error.
 
 Errores:
 - Si faltan `RESEND_API_KEY`, `EMAIL_FROM` o `APP_URL`, responde 500 con un mensaje claro, y el envío programado queda registrado como `error`.
 - Si Resend responde con error, se registra como `error` con su mensaje. La siguiente ejecución horaria reintenta, hasta que salga o termine el día; cada intento actualiza la misma fila.
+- Cualquier error de base de datos entre el claim y el envío registra `error`: solo un envío **ya intentado** que falla por red o timeout deja el día en `sending`.
+- `disabled` y `nothing_to_send` son estados finales del día: si el admin reactiva los correos, o aparece un vencimiento más tarde ese mismo día, el aviso llega al día siguiente.
 - **Nunca se envían dos correos el mismo día:** la fila se crea o actualiza con `local_date` único, y solo se envía si no hay una fila en estado final.
 
 ## Correo (módulo puro `_shared/reminder_email.ts`)
