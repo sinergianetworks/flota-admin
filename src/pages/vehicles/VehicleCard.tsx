@@ -69,8 +69,8 @@ function MovementBadge({ vehicle, status }: { vehicle: Vehicle; status: LiveStat
 // Intervalo asumido para la barra de progreso: 10.000 km
 const SERVICE_INTERVAL_KM = 10_000
 
-function MaintenanceBar({ vehicle, odometer, thresholdKm }: { vehicle: Vehicle; odometer: number; thresholdKm: number }) {
-  if (vehicle.next_maintenance_km == null) return null
+function MaintenanceBar({ vehicle, odometer, hasData, thresholdKm }: { vehicle: Vehicle; odometer: number; hasData: boolean; thresholdKm: number }) {
+  if (vehicle.next_maintenance_km == null || !hasData) return null
 
   const remaining = Number(vehicle.next_maintenance_km) - odometer
   const overdue = remaining <= 0
@@ -323,7 +323,7 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
               </div>
             ) : null}
 
-            <MaintenanceBar vehicle={vehicle} odometer={odometer.km} thresholdKm={settings.maintenance_km_threshold} />
+            <MaintenanceBar vehicle={vehicle} odometer={odometer.km} hasData={odometer.hasData} thresholdKm={settings.maintenance_km_threshold} />
             <MaintenanceDateRow vehicle={vehicle} thresholdDays={settings.maintenance_days_threshold} />
             <InsuranceRow vehicle={vehicle} thresholdDays={settings.insurance_days_threshold} />
           </div>

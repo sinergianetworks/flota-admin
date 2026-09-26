@@ -16,7 +16,7 @@ export interface Odometer {
 // correos de recordatorio. `refreshKey` fuerza a releer.
 export function useOdometer(vehicle: Vehicle, refreshKey: number): Odometer {
   const key = `${vehicle.id}:${refreshKey}`
-  const [row, setRow] = useState<{ key: string; value: Odometer | null } | null>(null)
+  const [row, setRow] = useState<{ key: string; vehicleId: string; value: Odometer | null } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -25,10 +25,12 @@ export function useOdometer(vehicle: Vehicle, refreshKey: number): Odometer {
       .select('odometer_km, source, from_log, has_data')
       .eq('vehicle_id', vehicle.id)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (cancelled) return
+        if (error) console.error(error)
         setRow({
           key,
+          vehicleId: vehicle.id,
           value: data
             ? { km: Number(data.odometer_km), source: data.source, hasData: data.has_data, fromLog: data.from_log }
             : null,
@@ -38,8 +40,11 @@ export function useOdometer(vehicle: Vehicle, refreshKey: number): Odometer {
   }, [vehicle.id, key])
 
   if (row?.key === key && row.value) return row.value
+  // Mientras se relee (nuevo refreshKey): conserva el último valor si es del
+  // mismo vehículo, para evitar el parpadeo a "Sin datos".
+  if (row?.vehicleId === vehicle.id && row.value) return row.value
 
-  // Mientras carga: el odómetro base del vehículo.
+  // Sin ninguna lectura todavía: el odómetro base del vehículo.
   const base = Number(vehicle.odometer_offset) || 0
   return { km: base, source: vehicle.gps_device_id ? 'gps' : 'manual', hasData: base > 0, fromLog: false }
 }
