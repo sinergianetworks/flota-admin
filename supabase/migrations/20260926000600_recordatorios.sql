@@ -23,9 +23,11 @@ insert into public.fleet_settings (id) values (true);
 
 alter table public.fleet_settings enable row level security;
 
+-- Solo los usuarios con rol vigente (activos) leen la configuración; un
+-- conductor desactivado pierde el acceso aunque su JWT siga vigente.
 create policy "fleet_settings_select" on public.fleet_settings
   for select to authenticated
-  using (true);
+  using ((select public.current_user_role()) is not null);
 
 create policy "fleet_settings_update_admin" on public.fleet_settings
   for update to authenticated
@@ -36,18 +38,67 @@ revoke all on public.fleet_settings from anon;
 revoke insert, delete on public.fleet_settings from authenticated;
 
 -- ── Registro de envíos ───────────────────────────────────────
+-- status 'sending': la edge function reservó el día y está armando/enviando
+-- el correo. Evita que dos ejecuciones del cron en la misma hora manden dos
+-- correos. Si el proceso se cae y el día queda colgado en 'sending', se
+-- trata como "posiblemente enviado": no se reintenta ese día.
 create table public.reminder_log (
   id          uuid primary key default gen_random_uuid(),
   local_date  date not null unique,
-  status      text not null check (status in ('sent', 'nothing_to_send', 'disabled', 'error')),
+  status      text not null check (status in ('sending', 'sent', 'nothing_to_send', 'disabled', 'error')),
   recipients  text[] not null default '{}',
   item_count  integer not null default 0,
   error       text,
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 
 alter table public.reminder_log enable row level security;
 revoke all on public.reminder_log from anon, authenticated;
+
+-- Reserva el día para el envío: inserta en 'sending' si el día no existía,
+-- o lo reintenta si quedó en 'error'. Cualquier otro estado ('sending',
+-- 'sent', 'nothing_to_send', 'disabled') no se toca y devuelve false, para
+-- no enviar dos veces el mismo día. Un INSERT ... ON CONFLICT ... RETURNING
+-- que no inserta ni actualiza no produce fila, así que el resultado (null)
+-- se envuelve en coalesce(..., false).
+create or replace function public.flota_claim_reminder_day(p_date date) returns boolean
+language sql security definer set search_path = '' as $$
+  with claimed as (
+    insert into public.reminder_log (local_date, status) values (p_date, 'sending')
+    on conflict (local_date) do update set status = 'sending', updated_at = now(), error = null
+      where public.reminder_log.status = 'error'
+    returning true as claimed
+  )
+  select coalesce((select claimed from claimed), false)
+$$;
+
+-- Solo la llama la edge function send-reminders (con el service role).
+revoke execute on function public.flota_claim_reminder_day(date) from public, anon, authenticated;
+grant execute on function public.flota_claim_reminder_day(date) to service_role;
+
+-- ── updated_at automático ────────────────────────────────────
+create or replace function public.flota_touch_updated_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+revoke execute on function public.flota_touch_updated_at() from public, anon, authenticated;
+
+create trigger fleet_settings_touch_updated_at
+  before update on public.fleet_settings
+  for each row execute function public.flota_touch_updated_at();
+
+create trigger reminder_log_touch_updated_at
+  before update on public.reminder_log
+  for each row execute function public.flota_touch_updated_at();
 
 -- ── Odómetro calculado ───────────────────────────────────────
 -- Con GPS: odómetro base + Σ km diarios.

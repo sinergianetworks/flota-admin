@@ -1,5 +1,14 @@
 // Aplica todas las migraciones sobre PGlite (Postgres en memoria) con stubs
 // mínimos de Supabase y prueba la RLS. Uso: npm run test:db
+//
+// Limitaciones del harness:
+// - Corre como superusuario de PGlite. En Supabase, el rol "postgres" NO es
+//   superusuario, así que los privilegios reales sobre Vault y pg_net (y
+//   cualquier cosa que dependa de RLS de superusuario) no se prueban aquí.
+// - auth.uid() es un stub que lee el GUC request.jwt.claim.sub (as() lo fija
+//   con set_config), no el JWT real de Supabase Auth.
+// - Las sentencias "create extension ..." de las migraciones se eliminan
+//   con una regex antes de aplicarlas, porque PGlite no las soporta.
 import { PGlite } from '@electric-sql/pglite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -118,27 +127,62 @@ r = await as(A, `update public.fleet_settings set insurance_days_threshold = 0`)
 ok('umbral 0 se rechaza', !!r.error)
 r = await as(A, `insert into public.fleet_settings (id) values (false)`)
 ok('no se insertan filas nuevas', !!r.error)
+r = await as(A, `delete from public.fleet_settings`)
+ok('nadie borra la configuración', !!r.error || r.affected === 0)
+r = await as(A, `select count(*) as n from public.fleet_settings`)
+ok('la fila de configuración sigue existiendo', Number(r.rows?.[0]?.n) === 1, JSON.stringify(r))
 r = await as(null, `select * from public.fleet_settings`, [], 'anon')
 ok('anon sin acceso a fleet_settings', !!r.error)
+r = await as(A, `update public.profiles set active = false where id = $1 returning active`, [D2])
+ok('admin desactiva al conductor', r.rows?.[0]?.active === false, JSON.stringify(r))
+r = await as(D2, `select * from public.fleet_settings`)
+ok('conductor desactivado no lee la configuración', !r.error && r.rows.length === 0, JSON.stringify(r))
 
 console.log('\nreminder_log')
 r = await as(A, `select * from public.reminder_log`)
-ok('admin no accede a reminder_log (solo service role)', !!r.error || r.rows.length === 0)
+ok('admin no accede a reminder_log (solo service role)', !!r.error)
 r = await as(null, `insert into public.reminder_log (local_date, status) values ('2026-09-26', 'sent')`, [], 'service_role')
 ok('service role registra envíos', !r.error, r.error)
 r = await as(null, `insert into public.reminder_log (local_date, status) values ('2026-09-26', 'sent')`, [], 'service_role')
 ok('un solo registro por día', !!r.error)
 
+console.log('\nflota_claim_reminder_day')
+r = await as(null, `select public.flota_claim_reminder_day('2026-09-27') as claimed`, [], 'service_role')
+ok('primer claim del día', r.rows?.[0]?.claimed === true, JSON.stringify(r))
+r = await as(null, `select public.flota_claim_reminder_day('2026-09-27') as claimed`, [], 'service_role')
+ok('segundo claim del mismo día no reclama de nuevo', r.rows?.[0]?.claimed === false, JSON.stringify(r))
+await as(null, `insert into public.reminder_log (local_date, status) values ('2026-09-28', 'error')`, [], 'service_role')
+r = await as(null, `select public.flota_claim_reminder_day('2026-09-28') as claimed`, [], 'service_role')
+ok('un día en error se reintenta', r.rows?.[0]?.claimed === true, JSON.stringify(r))
+r = await as(null, `select status from public.reminder_log where local_date = '2026-09-28'`, [], 'service_role')
+ok('el reintento queda en sending', r.rows?.[0]?.status === 'sending', JSON.stringify(r))
+r = await as(null, `select public.flota_claim_reminder_day('2026-09-26') as claimed`, [], 'service_role')
+ok('un día ya enviado no se reclama', r.rows?.[0]?.claimed === false, JSON.stringify(r))
+r = await as(A, `select public.flota_claim_reminder_day('2026-09-29')`)
+ok('authenticated no puede reclamar el día', !!r.error)
+
 console.log('\nvehicle_odometer')
 await as(A, `insert into public.vehicle_daily_mileage (vehicle_id, date, km) values ($1, '2026-09-24', 10.5), ($1, '2026-09-25', 20)`, [V.GPS])
 await as(A, `insert into public.vehicle_log (vehicle_id, type, description, odometer_km, date) values
   ($1, 'fuel', 'a', 700, '2026-09-20'), ($1, 'fuel', 'b', 650, '2026-09-22')`, [V.Manual])
+r = await as(A, `insert into public.vehicles (name, gps_provider, gps_device_id, odometer_offset) values
+  ('GPS0', 'tracksolid', '222', 0), ('ManualBajo', null, null, 500), ('ManualMismaFecha', null, null, 0)
+  returning id, name`)
+for (const x of r.rows) V[x.name] = x.id
+await as(A, `insert into public.vehicle_log (vehicle_id, type, description, odometer_km, date) values
+  ($1, 'fuel', 'menor a la base', 300, '2026-09-20')`, [V.ManualBajo])
+await as(A, `insert into public.vehicle_log (vehicle_id, type, description, odometer_km, date, created_at) values
+  ($1, 'fuel', 'primera', 400, '2026-09-23', '2026-09-23T08:00:00Z'),
+  ($1, 'fuel', 'segunda (más reciente)', 550, '2026-09-23', '2026-09-23T09:00:00Z')`, [V.ManualMismaFecha])
 r = await as(A, `select v.name, o.odometer_km::float as km, o.source, o.from_log, o.has_data
   from public.vehicle_odometer o join public.vehicles v on v.id = o.vehicle_id order by v.name`)
 const od = Object.fromEntries((r.rows ?? []).map(x => [x.name, x]))
 ok('GPS = base + Σ km diarios', od.GPS?.km === 1030.5 && od.GPS?.source === 'gps' && od.GPS?.has_data === true, JSON.stringify(od.GPS))
 ok('manual = máx(base, última lectura por fecha)', od.Manual?.km === 650 && od.Manual?.source === 'manual' && od.Manual?.from_log === true, JSON.stringify(od.Manual))
 ok('sin datos: has_data = false', od.Libre?.km === 0 && od.Libre?.has_data === false, JSON.stringify(od.Libre))
+ok('GPS con base 0 y sin km diarios: has_data = false', od.GPS0?.km === 0 && od.GPS0?.source === 'gps' && od.GPS0?.has_data === false, JSON.stringify(od.GPS0))
+ok('manual con lectura menor que la base: from_log = false y km = base', od.ManualBajo?.km === 500 && od.ManualBajo?.source === 'manual' && od.ManualBajo?.from_log === false, JSON.stringify(od.ManualBajo))
+ok('misma fecha: gana la de created_at más reciente', od.ManualMismaFecha?.km === 550, JSON.stringify(od.ManualMismaFecha))
 r = await as(D1, `select vehicle_id from public.vehicle_odometer`)
 ok('la vista respeta la RLS del conductor', r.rows?.length === 1 && r.rows[0].vehicle_id === V.GPS, JSON.stringify(r))
 r = await as(null, `select * from public.vehicle_odometer`, [], 'anon')
@@ -155,6 +199,8 @@ const call = (await db.query(`select url, headers from net.calls order by id des
 ok('con secretos llama a send-reminders', r.rows[0].id !== null && call.url === 'https://x.supabase.co/functions/v1/send-reminders' && call.headers['x-cron-secret'] === 's3cr3t', JSON.stringify(call))
 r = await as(A, `select public.flota_request_reminders()`)
 ok('authenticated no puede dispararlo', !!r.error)
+r = await as(null, `select public.flota_request_reminders()`, [], 'anon')
+ok('anon no puede dispararlo', !!r.error)
 
 console.log(`\n${pass} OK · ${fail} fallos`)
 process.exit(fail ? 1 : 0)
