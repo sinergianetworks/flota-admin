@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
 
 // Umbrales de aviso de la instalación (tabla fleet_settings, una sola fila).
-// Los mismos valores usa la función send-reminders para los correos.
+// Los mismos valores usan send-reminders y send-weekly-report.
 export interface FleetSettings {
   maintenance_km_threshold: number
   maintenance_days_threshold: number
   insurance_days_threshold: number
   email_reminders_enabled: boolean
+  notification_emails: string[]
+  weekly_report_enabled: boolean
+  weekly_report_day: number // 1 = lunes … 7 = domingo
 }
 
 export const DEFAULT_SETTINGS: FleetSettings = {
@@ -15,9 +18,12 @@ export const DEFAULT_SETTINGS: FleetSettings = {
   maintenance_days_threshold: 15,
   insurance_days_threshold: 30,
   email_reminders_enabled: true,
+  notification_emails: [],
+  weekly_report_enabled: true,
+  weekly_report_day: 1,
 }
 
-const COLUMNS = 'maintenance_km_threshold, maintenance_days_threshold, insurance_days_threshold, email_reminders_enabled'
+const COLUMNS = 'maintenance_km_threshold, maintenance_days_threshold, insurance_days_threshold, email_reminders_enabled, notification_emails, weekly_report_enabled, weekly_report_day'
 
 let cached: Promise<FleetSettings> | null = null
 // Último valor resuelto con éxito (por carga normal o estricta). Sirve de

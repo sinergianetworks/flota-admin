@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Loader2, Mail } from 'lucide-react'
+import { Settings, Loader2, Mail, CalendarDays, Shield, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { invokeFunction } from '@/lib/functions'
 import { DEFAULT_SETTINGS, fetchFleetSettingsStrict, setFleetSettingsCache, type FleetSettings } from '@/lib/settings'
@@ -8,43 +8,67 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-type Fields = Record<'maintenance_km_threshold' | 'maintenance_days_threshold' | 'insurance_days_threshold', string>
+type NumberKey = 'maintenance_km_threshold' | 'maintenance_days_threshold' | 'insurance_days_threshold'
 
-// Máximos razonables para los umbrales (también validados en el input con `max`).
-const MAX: Record<keyof Fields, number> = {
+interface Form {
+  numbers: Record<NumberKey, string>
+  emails: string // un correo por línea (también se aceptan comas)
+  dailyEnabled: boolean
+  weeklyEnabled: boolean
+  weeklyDay: number
+}
+
+const MAX: Record<NumberKey, number> = {
   maintenance_km_threshold: 1_000_000,
   maintenance_days_threshold: 3_650,
   insurance_days_threshold: 3_650,
 }
+const MAX_EMAILS = 50
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
-function toFields(s: FleetSettings): Fields {
+function toForm(s: FleetSettings): Form {
   return {
-    maintenance_km_threshold: String(s.maintenance_km_threshold),
-    maintenance_days_threshold: String(s.maintenance_days_threshold),
-    insurance_days_threshold: String(s.insurance_days_threshold),
+    numbers: {
+      maintenance_km_threshold: String(s.maintenance_km_threshold),
+      maintenance_days_threshold: String(s.maintenance_days_threshold),
+      insurance_days_threshold: String(s.insurance_days_threshold),
+    },
+    emails: s.notification_emails.join('\n'),
+    dailyEnabled: s.email_reminders_enabled,
+    weeklyEnabled: s.weekly_report_enabled,
+    weeklyDay: s.weekly_report_day,
   }
 }
+
+function parseEmails(raw: string): string[] {
+  return [...new Set(raw.split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean))]
+}
+
+// Forma normalizada para comparar si hay cambios sin guardar.
+function normalize(f: Form) {
+  return JSON.stringify({ ...f, emails: parseEmails(f.emails) })
+}
+
+type Result = { ok: boolean; text: string } | null
 
 export default function SettingsPage() {
   const [loaded, setLoaded] = useState<FleetSettings | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [fields, setFields] = useState<Fields>(toFields(DEFAULT_SETTINGS))
-  const [enabled, setEnabled] = useState(true)
+  const [form, setForm] = useState<Form>(toForm(DEFAULT_SETTINGS))
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [message, setMessage] = useState<Result>(null)
+  const [testing, setTesting] = useState<'daily' | 'weekly' | null>(null)
+  const [testResult, setTestResult] = useState<{ kind: 'daily' | 'weekly'; result: Result } | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoadError(null)
     fetchFleetSettingsStrict()
       .then(s => {
         if (cancelled) return
         setLoaded(s)
-        setFields(toFields(s))
-        setEnabled(s.email_reminders_enabled)
+        setForm(toForm(s))
       })
       .catch(e => {
         if (cancelled) return
@@ -59,14 +83,24 @@ export default function SettingsPage() {
     setReloadKey(k => k + 1)
   }
 
-  const dirty = loaded != null && (
-    JSON.stringify(fields) !== JSON.stringify(toFields(loaded)) || enabled !== loaded.email_reminders_enabled
-  )
+  function update(patch: Partial<Form>) {
+    setMessage(null)
+    setTestResult(null)
+    setForm(f => ({ ...f, ...patch }))
+  }
+
+  function updateNumber(key: NumberKey, value: string) {
+    setMessage(null)
+    setTestResult(null)
+    setForm(f => ({ ...f, numbers: { ...f.numbers, [key]: value } }))
+  }
+
+  const dirty = loaded != null && normalize(form) !== normalize(toForm(loaded))
 
   async function handleSave() {
     if (!loaded) return
     setMessage(null)
-    const entries = Object.entries(fields) as [keyof Fields, string][]
+    const entries = Object.entries(form.numbers) as [NumberKey, string][]
     const invalid = entries.find(([key, v]) => {
       const n = Number(v)
       return !Number.isInteger(n) || n < 1 || n > MAX[key]
@@ -75,16 +109,37 @@ export default function SettingsPage() {
       setMessage({ ok: false, text: `Los umbrales deben ser números enteros entre 1 y ${MAX[invalid[0]]}.` })
       return
     }
-    const values = Object.fromEntries(entries.map(([k, v]) => [k, Number(v)])) as Record<keyof Fields, number>
+    const emails = parseEmails(form.emails)
+    const badEmail = emails.find(e => !EMAIL_RE.test(e))
+    if (badEmail) {
+      setMessage({ ok: false, text: `"${badEmail}" no es un correo válido.` })
+      return
+    }
+    if (emails.length > MAX_EMAILS) {
+      setMessage({ ok: false, text: `Máximo ${MAX_EMAILS} destinatarios.` })
+      return
+    }
+    const values = {
+      ...Object.fromEntries(entries.map(([k, v]) => [k, Number(v)])) as Record<NumberKey, number>,
+      notification_emails: emails,
+      email_reminders_enabled: form.dailyEnabled,
+      weekly_report_enabled: form.weeklyEnabled,
+      weekly_report_day: form.weeklyDay,
+    }
     setSaving(true)
-    const { data, error } = await supabase
-      .from('fleet_settings')
-      .update({ ...values, email_reminders_enabled: enabled })
-      .eq('id', true)
-      .select('id')
+    const { data, error } = await supabase.from('fleet_settings').update(values).eq('id', true).select('id')
     setSaving(false)
     if (error) {
-      setMessage({ ok: false, text: error.message })
+      if (error.code === '23514') {
+        const text = error.message.includes('notification_emails')
+          ? 'Algún destinatario no es un correo válido o hay más de 50.'
+          : error.message.includes('weekly_report_day')
+            ? 'El día del reporte no es válido.'
+            : 'Algún valor no es válido.'
+        setMessage({ ok: false, text })
+      } else {
+        setMessage({ ok: false, text: error.message })
+      }
       return
     }
     if (!data || data.length === 0) {
@@ -95,37 +150,35 @@ export default function SettingsPage() {
     try {
       refreshed = await fetchFleetSettingsStrict()
     } catch {
-      // La escritura sí funcionó (hubo fila afectada); si la relectura falla,
-      // usamos igual los valores recién guardados en vez de mostrar error, y
-      // fijamos la caché para que las tarjetas no queden con los umbrales viejos.
-      refreshed = { ...values, email_reminders_enabled: enabled }
+      // La escritura funcionó; si la relectura falla, usamos los valores guardados.
+      refreshed = values
       setFleetSettingsCache(refreshed)
     }
     setLoaded(refreshed)
-    setFields(toFields(refreshed))
-    setEnabled(refreshed.email_reminders_enabled)
+    setForm(toForm(refreshed))
     setMessage({ ok: true, text: 'Configuración guardada.' })
   }
 
-  async function handleTest() {
-    setTesting(true)
+  async function handleTest(kind: 'daily' | 'weekly') {
+    setTesting(kind)
     setTestResult(null)
     try {
-      const res = await invokeFunction<{ items: number }>('send-reminders', { test: true })
-      setTestResult({
-        ok: true,
-        text: res.items > 0
-          ? `Correo enviado a tu dirección con ${res.items} vencimiento${res.items === 1 ? '' : 's'}.`
-          : 'Correo enviado a tu dirección (hoy no hay vencimientos).',
-      })
+      const fn = kind === 'daily' ? 'send-reminders' : 'send-weekly-report'
+      const res = await invokeFunction<{ items: number }>(fn, { test: true })
+      const text = kind === 'daily'
+        ? (res.items > 0
+          ? `Correo enviado a tu dirección con ${res.items} alerta${res.items === 1 ? '' : 's'} de mantenimiento.`
+          : 'Correo enviado a tu dirección (hoy no hay mantenimientos por vencer).')
+        : `Reporte enviado a tu dirección con ${res.items} vehículo${res.items === 1 ? '' : 's'}.`
+      setTestResult({ kind, result: { ok: true, text } })
     } catch (e) {
-      setTestResult({ ok: false, text: e instanceof Error ? e.message : String(e) })
+      setTestResult({ kind, result: { ok: false, text: e instanceof Error ? e.message : String(e) } })
     } finally {
-      setTesting(false)
+      setTesting(null)
     }
   }
 
-  const field = (key: keyof Fields, label: string, suffix: string, help: string) => {
+  const numberField = (key: NumberKey, label: string, suffix: string, help: string) => {
     const helpId = `${key}-help`
     return (
       <div className="space-y-1">
@@ -138,12 +191,9 @@ export default function SettingsPage() {
             max={MAX[key]}
             step={1}
             className="w-32"
-            value={fields[key]}
+            value={form.numbers[key]}
             aria-describedby={helpId}
-            onChange={e => {
-              setMessage(null)
-              setFields(f => ({ ...f, [key]: e.target.value }))
-            }}
+            onChange={e => updateNumber(key, e.target.value)}
           />
           <span className="text-sm text-muted-foreground">{suffix}</span>
         </div>
@@ -152,6 +202,33 @@ export default function SettingsPage() {
     )
   }
 
+  const testButton = (kind: 'daily' | 'weekly', label: string) => (
+    <div className="space-y-1">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button variant="outline" size="sm" onClick={() => handleTest(kind)} disabled={testing != null || dirty}>
+          {testing === kind ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</> : label}
+        </Button>
+        {dirty && <p className="text-sm text-muted-foreground break-all">Guarda los cambios para probar con la nueva configuración.</p>}
+        {testResult?.kind === kind && testResult.result && (
+          <p role="status" aria-live="polite" className={`text-sm break-all ${testResult.result.ok ? 'text-green-700' : 'text-red-600'}`}>
+            {testResult.result.text}
+          </p>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">La prueba se envía solo a tu correo y usa la configuración guardada.</p>
+    </div>
+  )
+
+  const checkbox = (checked: boolean, onChange: (v: boolean) => void, label: string, help: string) => (
+    <label className="flex items-start gap-3 cursor-pointer">
+      <input type="checkbox" className="mt-1 h-4 w-4 accent-[hsl(var(--primary))]" checked={checked} onChange={e => onChange(e.target.checked)} />
+      <span className="text-sm">
+        {label}
+        <span className="block text-xs text-muted-foreground">{help}</span>
+      </span>
+    </label>
+  )
+
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-6">
       <div>
@@ -159,7 +236,7 @@ export default function SettingsPage() {
           <Settings size={22} />
           Configuración
         </h1>
-        <p className="text-sm text-muted-foreground">Umbrales de aviso y recordatorios por correo</p>
+        <p className="text-sm text-muted-foreground">Correos de la flota: destinatarios, alertas diarias y reporte semanal</p>
       </div>
 
       {loadError ? (
@@ -174,61 +251,71 @@ export default function SettingsPage() {
       ) : (
         <>
           <Card>
-            <CardContent className="pt-6 space-y-5">
-              <h2 className="font-medium">Avisar con anticipación</h2>
-              {field('maintenance_km_threshold', 'Mantenimiento por kilometraje', 'km antes',
-                'La tarjeta pasa a "Próximo pronto" y se incluye en el correo.')}
-              {field('maintenance_days_threshold', 'Mantenimiento por fecha', 'días antes',
-                'Para vehículos con fecha de próximo mantenimiento.')}
-              {field('insurance_days_threshold', 'Vencimiento del seguro', 'días antes',
-                'Alerta en la tarjeta y aviso por correo.')}
+            <CardContent className="pt-6 space-y-3">
+              <h2 id="recipients-title" className="font-medium flex items-center gap-2"><Users size={16} /> Destinatarios de los correos</h2>
+              <textarea
+                id="notification_emails"
+                rows={4}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder={'flota@tu-empresa.com\njefe.taller@tu-empresa.com'}
+                value={form.emails}
+                aria-labelledby="recipients-title"
+                aria-describedby="notification_emails-help"
+                onChange={e => update({ emails: e.target.value })}
+              />
+              <p id="notification_emails-help" className="text-xs text-muted-foreground">
+                Uno por línea, o separados por comas (hasta {MAX_EMAILS}). Reciben las alertas diarias y el reporte semanal. Si lo dejas vacío, se envían a los administradores activos.
+              </p>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="pt-6 space-y-4">
-              <h2 className="font-medium flex items-center gap-2"><Mail size={16} /> Recordatorios por correo</h2>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-[hsl(var(--primary))]"
-                  checked={enabled}
-                  onChange={e => {
-                    setMessage(null)
-                    setEnabled(e.target.checked)
-                  }}
-                />
-                <span className="text-sm">
-                  Enviar un resumen diario de vencimientos
-                  <span className="block text-xs text-muted-foreground">
-                    Se envía a partir de las 7:00 (hora local de la instalación) a todos los administradores activos y se
-                    repite cada día hasta que se actualice el dato. Los cambios hechos después de las 7:00 se
-                    aplican desde mañana.
-                  </span>
-                </span>
-              </label>
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button variant="outline" size="sm" onClick={handleTest} disabled={testing || dirty}>
-                  {testing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</> : 'Enviar correo de prueba'}
-                </Button>
-                {dirty && (
-                  <p className="text-sm text-muted-foreground">
-                    Guarda los cambios para probar con la nueva configuración.
-                  </p>
-                )}
-                {testResult && (
-                  <p role="status" aria-live="polite" className={`text-sm ${testResult.ok ? 'text-green-700' : 'text-red-600'}`}>
-                    {testResult.text}
-                  </p>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">La prueba usa la configuración guardada.</p>
+            <CardContent className="pt-6 space-y-5">
+              <h2 className="font-medium flex items-center gap-2"><Mail size={16} /> Alertas diarias de mantenimiento</h2>
+              {checkbox(form.dailyEnabled, v => update({ dailyEnabled: v }), 'Enviar alertas diarias',
+                'Se envían a partir de las 7:00 (hora local) solo si hay mantenimientos por vencer o vencidos, y se repiten cada día hasta que se actualice el dato.')}
+              {numberField('maintenance_km_threshold', 'Avisar por kilometraje', 'km antes',
+                'La tarjeta pasa a "Próximo pronto" y se incluye en la alerta.')}
+              {numberField('maintenance_days_threshold', 'Avisar por fecha', 'días antes',
+                'Para vehículos con fecha de próximo mantenimiento.')}
+              {testButton('daily', 'Probar alerta diaria')}
             </CardContent>
           </Card>
 
-          <div className="flex items-center justify-end gap-3">
+          <Card>
+            <CardContent className="pt-6 space-y-5">
+              <h2 className="font-medium flex items-center gap-2"><CalendarDays size={16} /> Reporte semanal</h2>
+              {checkbox(form.weeklyEnabled, v => update({ weeklyEnabled: v }), 'Enviar el reporte semanal',
+                'Resumen de todos los vehículos de los últimos 7 días. Se envía a partir de las 7:00 (hora local) del día elegido.')}
+              <div className="space-y-1">
+                <Label htmlFor="weekly_report_day">Día de envío</Label>
+                <select
+                  id="weekly_report_day"
+                  className="block w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  value={form.weeklyDay}
+                  onChange={e => update({ weeklyDay: Number(e.target.value) })}
+                >
+                  {WEEKDAYS.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Si cambias el día después de que salió el reporte de esta semana, puede llegar un segundo reporte en la semana.
+                </p>
+              </div>
+              {testButton('weekly', 'Probar reporte semanal')}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6 space-y-5">
+              <h2 className="font-medium flex items-center gap-2"><Shield size={16} /> Seguro</h2>
+              {numberField('insurance_days_threshold', 'Avisar vencimiento del seguro', 'días antes',
+                'Alerta en la tarjeta y en el reporte semanal.')}
+            </CardContent>
+          </Card>
+
+          <div className="flex items-center justify-end gap-3 flex-wrap">
             {message && (
-              <p role="status" aria-live="polite" className={`text-sm ${message.ok ? 'text-green-700' : 'text-red-600'}`}>
+              <p role="status" aria-live="polite" className={`text-sm break-all ${message.ok ? 'text-green-700' : 'text-red-600'}`}>
                 {message.text}
               </p>
             )}

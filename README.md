@@ -14,7 +14,7 @@ Plataforma web para administrar una flota de vehículos: kilometraje, mantenimie
   - sin GPS: la última lectura registrada en la bitácora.
 - **Mantenimiento:** próximo servicio por km y por fecha, con barra de progreso y alertas.
 - **Seguro:** aseguradora, póliza, vencimiento (con alerta 30 días antes) y documento adjunto.
-- **Recordatorios por correo:** resumen diario a los administradores con mantenimientos y seguros próximos o vencidos, hasta que se actualice el dato. Los umbrales se configuran desde la app.
+- **Correos a la flota:** alerta diaria cuando un mantenimiento (por km o por fecha) está por vencer, con los días estimados según el uso, y un reporte semanal con el estado de todos los vehículos. Destinatarios, umbrales y día del reporte se configuran desde la app.
 - **Bitácora:** mantenimientos, reparaciones, repuestos, combustible y notas, con costo y kilometraje.
 - **GPS (opcional):**
   - estado en vivo (en marcha, ralentí, motor apagado, sin señal);
