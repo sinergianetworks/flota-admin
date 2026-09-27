@@ -139,7 +139,7 @@ Deno.test('averageKmPerDay: 6 días con registro más el de hoy → null (hoy no
 Deno.test('estimatedDays en mantenimiento por km (redondeo hacia arriba), no en vencidos', () => {
   const avg = new Map([['a', 100], ['b', 100]])
   const items = computeReminders(
-    [v({ id: 'a', next_maintenance_km: 10750 }), v({ id: 'b', next_maintenance_km: 9900 }), v({ id: 'c', next_maintenance_km: 10500 })],
+    [v({ id: 'a', next_maintenance_km: 10750, gps_device_id: '1' }), v({ id: 'b', next_maintenance_km: 9900, gps_device_id: '2' }), v({ id: 'c', next_maintenance_km: 10500, gps_device_id: '3' })],
     [odo('a', 10000), odo('b', 10000), odo('c', 10000)], S, TODAY, avg)
   const byId = Object.fromEntries(items.map(i => [i.vehicleId, i]))
   assertEquals(byId.a.estimatedDays, 8)       // 750 / 100 → 7,5 → 8
@@ -150,7 +150,15 @@ Deno.test('estimatedDays en mantenimiento por km (redondeo hacia arriba), no en 
 Deno.test('estimatedDays: sin asignar si supera MAX_ESTIMATE_DAYS (365)', () => {
   const avg = new Map([['a', 1]])
   const items = computeReminders(
-    [v({ id: 'a', next_maintenance_km: 11500 })],
+    [v({ id: 'a', next_maintenance_km: 11500, gps_device_id: '1' })],
     [odo('a', 10000)], S, TODAY, avg)
   assertEquals(items[0].estimatedDays, undefined) // 1.500 km / 1 km/día = 1.500 días > 365
+})
+
+Deno.test('estimatedDays: sin asignar si el vehículo no tiene gps_device_id', () => {
+  const avg = new Map([['a', 100]])
+  const items = computeReminders(
+    [v({ id: 'a', next_maintenance_km: 10750, gps_device_id: null })],
+    [odo('a', 10000)], S, TODAY, avg)
+  assertEquals(items[0].estimatedDays, undefined)
 })

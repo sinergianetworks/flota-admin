@@ -24,8 +24,8 @@ const state = {
     notification_emails: [] as string[], weekly_report_enabled: true, weekly_report_day: 1,
   },
   vehicles: [
-    { id: 'v1', name: 'Pickup', plate: 'AB-1', active: true, next_maintenance_km: 10500, next_maintenance_date: null, insurance_expiry: '2026-09-20' },
-    { id: 'v2', name: 'Sedán', plate: null, active: true, next_maintenance_km: null, next_maintenance_date: null, insurance_expiry: null },
+    { id: 'v1', name: 'Pickup', plate: 'AB-1' as string | null, active: true, next_maintenance_km: 10500 as number | null, next_maintenance_date: null as string | null, insurance_expiry: '2026-09-20' as string | null, gps_device_id: '111' as string | null },
+    { id: 'v2', name: 'Sedán', plate: null as string | null, active: true, next_maintenance_km: null as number | null, next_maintenance_date: null as string | null, insurance_expiry: null as string | null, gps_device_id: null as string | null },
   ],
   odometers: [{ vehicle_id: 'v1', odometer_km: 10000, has_data: true }],
   mileage: [] as { vehicle_id: string; date: string; km: number }[],
@@ -33,6 +33,7 @@ const state = {
   log: new Map<string, Record<string, unknown>>(),
   emails: [] as Record<string, unknown>[],
   resendFails: false,
+  profilesCalls: 0,
   // Camino del REST que debe responder 500, para simular un error de base de
   // datos en ese paso concreto.
   failEndpoint: null as string | null,
@@ -46,6 +47,7 @@ function resetState() {
   state.settings.email_reminders_enabled = true
   state.settings.notification_emails = []
   state.mileage = []
+  state.profilesCalls = 0
 }
 
 const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
@@ -79,12 +81,20 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
       return Response.json(state.vehicles)
     }
     case '/rest/v1/vehicle_odometer': return Response.json(state.odometers)
-    case '/rest/v1/vehicle_daily_mileage': return Response.json(state.mileage)
+    case '/rest/v1/vehicle_daily_mileage': {
+      const dates = url.searchParams.getAll('date')
+      const vehicleId = url.searchParams.get('vehicle_id') ?? ''
+      if (dates[0] !== 'gte.2026-08-29' || dates[1] !== 'lt.2026-09-26' || !vehicleId.startsWith('in.(')) {
+        return new Response('consulta de kilometraje mal formada', { status: 400 })
+      }
+      return Response.json(state.mileage)
+    }
     case '/rest/v1/profiles': {
       const id = url.searchParams.get('id')
       if (id === 'eq.u-admin') return one({ role: 'admin', active: true })
       if (id === 'eq.u-driver') return one({ role: 'driver', active: true })
       if (id === 'eq.u-sinmail') return one({ role: 'admin', active: true })
+      state.profilesCalls++
       if (url.searchParams.get('role') !== 'eq.admin' || url.searchParams.get('active') !== 'eq.true') {
         return new Response('falta role=eq.admin&active=eq.true', { status: 400 })
       }
@@ -306,10 +316,11 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
 
     await t.step('destinatarios configurados reemplazan a los admins', async () => {
       resetState()
-      state.settings.notification_emails = ['flota@ejemplo.test', 'jefe@ejemplo.test']
+      state.settings.notification_emails = ['Flota@Ejemplo.test ', 'flota@ejemplo.test', 'jefe@ejemplo.test']
       const res = await (await at(SIETE)(cron())).json()
       assertEquals(res.status, 'sent')
       assertEquals(state.emails[0].to, ['flota@ejemplo.test', 'jefe@ejemplo.test'])
+      assertEquals(state.profilesCalls, 0)
     })
 
     await t.step('estimación de días con el kilometraje de los últimos 28 días', async () => {
@@ -318,6 +329,16 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       state.mileage = Array.from({ length: 14 }, (_, i) => ({ vehicle_id: 'v1', date: `2026-09-${String(12 + i).padStart(2, '0')}`, km: 100 }))
       await (await at(SIETE)(cron())).json()
       assertStringIncludes(String(state.emails[0].text), '≈ 10 días al ritmo actual')
+    })
+
+    await t.step('sin gps_device_id: no estima aunque haya kilometraje', async () => {
+      resetState()
+      const saved = state.vehicles
+      state.vehicles = saved.map(v => v.id === 'v1' ? { ...v, gps_device_id: null } : v)
+      state.mileage = Array.from({ length: 14 }, (_, i) => ({ vehicle_id: 'v1', date: `2026-09-${String(12 + i).padStart(2, '0')}`, km: 100 }))
+      await (await at(SIETE)(cron())).json()
+      state.vehicles = saved
+      assertEquals(String(state.emails[0].text).includes('≈'), false)
     })
 
     await t.step('desactivado y reactivado el mismo día: la hora siguiente envía', async () => {

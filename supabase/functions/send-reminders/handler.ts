@@ -53,12 +53,22 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
       testRecipients,
       configuredRecipients: settings.notification_emails,
       prepare: async () => {
-        const [vRes, oRes, mRes] = await Promise.all([
-          db.from('vehicles').select('id, name, plate, active, next_maintenance_km, next_maintenance_date, insurance_expiry, gps_device_id').eq('active', true),
+        const vRes = await db.from('vehicles')
+          .select('id, name, plate, active, next_maintenance_km, next_maintenance_date, insurance_expiry, gps_device_id')
+          .eq('active', true)
+        if (vRes.error) throw new HttpError(500, vRes.error.message)
+
+        // El kilometraje solo sirve para estimar días en vehículos con GPS
+        // (ver reminders.ts); si ninguno tiene, no vale la pena consultarlo.
+        const gpsIds = (vRes.data ?? []).filter(v => v.gps_device_id).map(v => v.id)
+        const [oRes, mRes] = await Promise.all([
           db.from('vehicle_odometer').select('vehicle_id, odometer_km, has_data'),
-          db.from('vehicle_daily_mileage').select('vehicle_id, date, km').gte('date', addDays(today, -28)).lt('date', today),
+          gpsIds.length > 0
+            ? db.from('vehicle_daily_mileage').select('vehicle_id, date, km')
+                .gte('date', addDays(today, -28)).lt('date', today).in('vehicle_id', gpsIds)
+            : Promise.resolve({ data: [] as { vehicle_id: string; date: string; km: number }[], error: null }),
         ])
-        const err = vRes.error ?? oRes.error ?? mRes.error
+        const err = oRes.error ?? mRes.error
         if (err) throw new HttpError(500, err.message)
 
         const byVehicle = new Map<string, { date: string; km: number }[]>()

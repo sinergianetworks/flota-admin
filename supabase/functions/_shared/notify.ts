@@ -34,15 +34,24 @@ export async function loadNotificationSettings(db: SupabaseClient): Promise<Noti
   return { ...data, notification_emails: data.notification_emails ?? [] } as NotificationSettings
 }
 
+const MAX_RECIPIENTS = 50
+
+function normalizeEmails(emails: string[]): string[] {
+  return [...new Set((emails ?? []).map(e => e.trim().toLowerCase()).filter(Boolean))]
+}
+
 // La lista configurada o, si está vacía, los administradores activos.
 export async function resolveRecipients(db: SupabaseClient, configured: string[]): Promise<string[]> {
-  const list = [...new Set((configured ?? []).map(e => e.trim()).filter(Boolean))]
-  if (list.length > 0) return list
-  const { data, error } = await db.from('profiles').select('email').eq('role', 'admin').eq('active', true)
-  if (error) throw new HttpError(500, `No se pudo leer los administradores: ${error.message}`)
-  const admins = (data ?? []).map((a: { email: string }) => a.email).filter(Boolean)
-  if (admins.length === 0) throw new HttpError(500, 'No hay destinatarios: la lista está vacía y no hay administradores activos con correo.')
-  return admins
+  const list = normalizeEmails(configured)
+  const recipients = list.length > 0 ? list : await (async () => {
+    const { data, error } = await db.from('profiles').select('email').eq('role', 'admin').eq('active', true)
+    if (error) throw new HttpError(500, `No se pudo leer los administradores: ${error.message}`)
+    const admins = normalizeEmails((data ?? []).map((a: { email: string }) => a.email).filter(Boolean))
+    if (admins.length === 0) throw new HttpError(500, 'No hay destinatarios: la lista está vacía y no hay administradores activos con correo.')
+    return admins
+  })()
+  if (recipients.length > MAX_RECIPIENTS) throw new HttpError(500, 'Hay más de 50 destinatarios; Resend admite hasta 50.')
+  return recipients
 }
 
 export interface Prepared {
@@ -107,6 +116,8 @@ export async function deliver(db: SupabaseClient, o: DeliverOptions): Promise<Re
     }
 
     recipients = test ? (o.testRecipients ?? []) : await resolveRecipients(db, o.configuredRecipients)
+    // Solo alcanzable en modo prueba: resolveRecipients ya lanza si la lista
+    // queda vacía (sin destinatarios configurados ni administradores activos).
     if (recipients.length === 0) throw new HttpError(400, 'No hay destinatarios para la prueba.')
 
     const cfg = emailConfig()

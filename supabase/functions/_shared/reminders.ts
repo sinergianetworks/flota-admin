@@ -86,7 +86,7 @@ export function computeReminders(
           const overdue = remaining <= 0
           const avg = avgKmPerDay.get(v.id)
           const item: ReminderItem = { ...base, kind: 'maintenance_km', remaining, overdue, dueKm }
-          if (!overdue && avg != null && avg > 0) {
+          if (!overdue && v.gps_device_id && avg != null && avg > 0) {
             const estimatedDays = Math.ceil(remaining / avg)
             if (estimatedDays <= MAX_ESTIMATE_DAYS) item.estimatedDays = estimatedDays
           }
