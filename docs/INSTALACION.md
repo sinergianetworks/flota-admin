@@ -74,9 +74,9 @@ Para verificar: en *Table Editor* deben aparecer las 7 tablas y la vista `vehicl
 npx supabase@latest functions deploy --use-api
 ```
 
-Despliega `create-user`, `gps-status`, `sync-mileage` y `send-reminders`. `--use-api` empaqueta en los servidores de Supabase, así que no necesitas Docker.
+Despliega `create-user`, `gps-status`, `sync-mileage`, `send-reminders` y `send-weekly-report`. `--use-api` empaqueta en los servidores de Supabase, así que no necesitas Docker.
 
-Las cuatro funciones se despliegan con **Verify JWT desactivado** (lo define `supabase/config.toml`), porque cada una valida la sesión en su propio código. En *Edge Functions* del panel deben verse las cuatro, con *Verify JWT* en **off**.
+Las cinco funciones se despliegan con **Verify JWT desactivado** (lo define `supabase/config.toml`), porque cada una valida la sesión en su propio código. En *Edge Functions* del panel deben verse las cinco, con *Verify JWT* en **off**.
 
 ## 4. Configurar los secrets de las funciones
 
@@ -215,19 +215,18 @@ select jobname, schedule, active from cron.job where jobname like 'flota-%';
 |---|---|---|
 | `flota-sync-km-hoy` | cada hora (minuto 5) | km del día en curso |
 | `flota-sync-km-ayer` | cada 6 horas | cierra el día anterior |
+| `flota-reporte-semanal` | cada hora (minuto 15) | envía el reporte semanal el día configurado |
 
 El cron corre en UTC, pero el día se calcula en `APP_TIMEZONE`. Además, el administrador puede forzar la sincronización del día con el botón ⟳ de la pantalla de vehículos.
 
-## 9. Recordatorios por correo (opcional)
+## 9. Correos: alertas diarias y reporte semanal (opcional)
 
-Todos los días, a partir de las 7:00 (hora de `APP_TIMEZONE`), Flota Admin envía a los administradores activos un resumen con:
+Flota Admin envía dos correos a la **lista de destinatarios** de Configuración (si está vacía, a los administradores activos):
 
-- los mantenimientos próximos o vencidos, por kilometraje y por fecha;
-- los seguros por vencer o vencidos.
+- **Alerta diaria de mantenimiento:** a partir de las 7:00 (hora de `APP_TIMEZONE`), solo si hay mantenimientos por km o por fecha por vencer o vencidos. Los avisos por km incluyen los días estimados según el uso de los últimos 28 días (vehículos con GPS). Se repite cada día hasta que se actualice el mantenimiento en la app.
+- **Reporte semanal:** el día elegido (lunes por defecto), a partir de las 7:00. Resume todos los vehículos: odómetro, km de la semana, próximo mantenimiento, seguro y alertas.
 
-El aviso se repite cada día hasta que se actualiza el dato en la app. Si no hay nada que avisar, no se envía correo.
-
-> Requiere los secretos de Vault del paso 8, aunque no uses GPS. Mientras no completes `RESEND_API_KEY` (más abajo), el job no hace nada: no se envían correos ni se registran errores.
+> Requiere los secretos de Vault del paso 8, aunque no uses GPS. Mientras no completes `RESEND_API_KEY` (más abajo), los jobs no hacen nada: no se envían correos ni se registran errores.
 
 1. Crea una cuenta en [Resend](https://resend.com):
    - *Domains → Add domain*: agrega los registros DNS que indica y espera a que el dominio quede **verificado**.
@@ -238,24 +237,23 @@ El aviso se repite cada día hasta que se actualiza el dato en la app. Si no hay
    npx supabase@latest secrets set --env-file supabase/functions/.env
    ```
 
-3. En la app, entra a **Configuración**:
-   - ajusta los umbrales, si quieres;
-   - pulsa **Enviar correo de prueba**: te llega a tu dirección con los vencimientos de hoy.
+3. En la app, entra a **Configuración**, carga los destinatarios, elige el día del reporte y usa **Probar alerta diaria** y **Probar reporte semanal**.
 
-El job `flota-recordatorios` usa los mismos secretos de Vault que el cron de kilometraje (paso 8), así que no hace falta nada más. Para revisar los envíos:
+Los jobs `flota-recordatorios` y `flota-reporte-semanal` usan los mismos secretos de Vault que el cron de kilometraje (paso 8), así que no hace falta nada más. Para revisar los envíos:
 
 ```sql
-select local_date, status, item_count, recipients, error
+select kind, local_date, status, item_count, recipients, error
 from public.reminder_log
-order by local_date desc
-limit 10;
+order by local_date desc, kind
+limit 20;
 ```
 
 | status | Significado |
 |---|---|
+| `kind` | `daily` es la alerta diaria y `weekly` el reporte semanal. |
 | `sent` | Correo enviado. |
 | `nothing_to_send` | No había vencimientos ese día; no se envió correo. |
-| `disabled` | Los recordatorios estaban desactivados en Configuración. |
+| `disabled` | Registros anteriores; ya no se registra (si el correo está desactivado, no se reserva el día). |
 | `error` | No se pudo enviar (ver columna `error`); se reintenta cada hora ese día. |
 | `sending` | Envío en curso, o posiblemente enviado si quedó así (corte de red o error al registrar); no se reintenta para no duplicar. |
 
@@ -265,14 +263,14 @@ limit 10;
 
 - [ ] Registro público desactivado (paso 1).
 - [ ] `db push` sin errores; 7 tablas, la vista `vehicle_odometer` y 2 buckets (paso 2).
-- [ ] 4 funciones desplegadas con *Verify JWT* en off (paso 3).
+- [ ] 5 funciones desplegadas con *Verify JWT* en off (paso 3).
 - [ ] `secrets list` muestra `APP_TIMEZONE` y `SYNC_CRON_SECRET` (paso 4).
 - [ ] El administrador inicia sesión y ve **Vehículos** y **Usuarios** (pasos 5 y 6).
 - [ ] *Site URL* y *Redirect URLs* configuradas (paso 6).
 - [ ] Un conductor de prueba ve solo el vehículo que tiene asignado.
 - [ ] (GPS) El proveedor aparece configurado y el mapa muestra la posición (paso 7).
 - [ ] `flota_request_mileage_sync('today')` responde 200 (paso 8).
-- [ ] (Correo) El correo de prueba llega desde **Configuración** (paso 9).
+- [ ] (Correo) La alerta diaria y el reporte semanal de prueba llegan desde **Configuración** (paso 9).
 
 ## Problemas frecuentes
 
