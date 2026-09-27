@@ -16,10 +16,10 @@ language sql
 immutable
 set search_path = ''
 as $$
-  select coalesce(array_length(p, 1), 0) <= 50
+  select cardinality(p) <= 50
      and not exists (
        select 1 from unnest(p) as e
-       where e !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+       where e is null or e !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
      )
 $$;
 
@@ -35,8 +35,10 @@ alter table public.fleet_settings
 comment on column public.fleet_settings.notification_emails is 'Destinatarios de los correos. Vacía = administradores activos.';
 comment on column public.fleet_settings.weekly_report_day is 'Día del reporte semanal: 1 = lunes … 7 = domingo.';
 
--- El admin ya tiene update sobre toda la tabla salvo id (privilegios de 0600).
--- Por las dudas se otorga explícitamente sobre las columnas nuevas.
+-- authenticated ya tiene UPDATE por los privilegios por defecto (0600) y la
+-- RLS limita quién edita en la práctica al admin; id lo protegen el
+-- check (id) y la PK. Este grant es redundante pero explícito, para dejar
+-- claro por columnas qué se puede editar sin depender solo de la RLS.
 grant update (notification_emails, weekly_report_enabled, weekly_report_day) on public.fleet_settings to authenticated;
 
 -- ── Tipo de envío en el registro ─────────────────────────────
