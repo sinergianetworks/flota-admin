@@ -8,7 +8,7 @@ Plataforma web para administrar una flota de vehículos: kilometraje, mantenimie
 
 ## Funcionalidades
 
-- **Vehículos:** foto, placa, chasis, conductor asignado y notas.
+- **Vehículos:** foto, placa, chasis, conductor asignado y notas. Los vehículos fuera de uso se **archivan**: dejan de aparecer (y de contar en GPS y correos), conservan su historial y se pueden restaurar.
 - **Odómetro:**
   - con GPS: odómetro base + km diarios del GPS;
   - sin GPS: la última lectura registrada en la bitácora.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Truck, Upload, Shield, FileText, Satellite } from 'lucide-react'
+import { Truck, Upload, Shield, FileText, Satellite, Archive } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { compressImage } from '@/lib/compressImage'
 import { listGpsDevices, listGpsProviders } from '@/lib/gps'
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import ArchiveVehicleDialog from './ArchiveVehicleDialog'
 
 interface Driver {
   id: string
@@ -26,6 +27,14 @@ interface Props {
 }
 
 const NONE = 'none'
+
+// Mensaje para errores de guardado conocidos (restricciones de la base).
+function saveErrorMessage(err: { code?: string; message: string }): string {
+  if (err.code === '23505' && err.message.includes('vehicles_gps_device_uidx')) {
+    return 'Ese equipo GPS ya está asignado a otro vehículo (puede estar archivado). Libéralo en ese vehículo o elige otro.'
+  }
+  return err.message
+}
 
 export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props) {
   const [name, setName] = useState('')
@@ -52,6 +61,7 @@ export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props)
   const [devicesError, setDevicesError] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   const storedPhotoUrl = useSignedUrl(PHOTOS_BUCKET, open ? vehicle?.photo_url : null)
   const photoUrl = photoPreview ?? storedPhotoUrl
@@ -150,10 +160,10 @@ export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props)
       let vehicleId = vehicle?.id
       if (vehicle) {
         const { error: err } = await supabase.from('vehicles').update(payload).eq('id', vehicle.id)
-        if (err) throw new Error(err.message)
+        if (err) throw new Error(saveErrorMessage(err))
       } else {
         const { data, error: err } = await supabase.from('vehicles').insert(payload).select('id').single()
-        if (err || !data) throw new Error(err?.message ?? 'No se pudo crear el vehículo.')
+        if (err || !data) throw new Error(err ? saveErrorMessage(err) : 'No se pudo crear el vehículo.')
         vehicleId = data.id
       }
 
@@ -181,6 +191,7 @@ export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props)
   const deviceInList = devices.some(d => d.id === gpsDeviceId)
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -374,7 +385,14 @@ export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props)
           {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex items-center gap-2 pt-2">
+          {vehicle?.active && (
+            <Button variant="ghost" className="gap-1 text-muted-foreground" onClick={() => setArchiveOpen(true)} disabled={saving}>
+              <Archive size={15} />
+              Archivar
+            </Button>
+          )}
+          <div className="flex-1" />
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>
             {saving ? 'Guardando...' : 'Guardar'}
@@ -382,5 +400,18 @@ export default function VehicleModal({ vehicle, open, onClose, onSaved }: Props)
         </div>
       </DialogContent>
     </Dialog>
+    {vehicle && (
+      <ArchiveVehicleDialog
+        vehicle={vehicle}
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        onArchived={() => {
+          setArchiveOpen(false)
+          onSaved()
+          onClose()
+        }}
+      />
+    )}
+    </>
   )
 }
