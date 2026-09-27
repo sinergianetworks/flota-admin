@@ -18,15 +18,16 @@ interface Fleet {
   statuses: Record<string, LiveStatus> | null
 }
 
-// La RLS decide qué se ve: el admin ve toda la flota y el conductor solo su vehículo.
-async function loadFleet(): Promise<Fleet> {
+// La RLS decide qué se ve: el admin ve toda la flota y el conductor solo su
+// vehículo activo. Los archivados no consultan el GPS en vivo.
+async function loadFleet(archived = false): Promise<Fleet> {
   const { data } = await supabase
     .from('vehicles')
     .select('*, driver:profiles(full_name)')
-    .eq('active', true)
+    .eq('active', !archived)
     .order('name')
   const vehicles = (data ?? []) as Vehicle[]
-  if (!vehicles.some(v => v.gps_device_id)) return { vehicles, statuses: {} }
+  if (archived || !vehicles.some(v => v.gps_device_id)) return { vehicles, statuses: {} }
   const statuses = await getLiveStatuses().catch(() => null)
   return { vehicles, statuses }
 }
@@ -35,7 +36,11 @@ export default function VehiclesPage() {
   const { isAdmin } = useAuth()
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [statuses, setStatuses] = useState<Record<string, LiveStatus>>({})
-  const [loading, setLoading] = useState(true)
+  // Solo el admin puede ver los archivados.
+  const [showArchived, setShowArchived] = useState(false)
+  // Vista (activos/archivados) cuyos datos ya se cargaron; mientras no coincida, se muestra el esqueleto.
+  const [loadedView, setLoadedView] = useState<boolean | null>(null)
+  const loading = loadedView !== showArchived
   const [refreshing, setRefreshing] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
@@ -49,9 +54,9 @@ export default function VehiclesPage() {
 
   // Recarga completa: además recalcula odómetros y gráficas (refreshKey).
   const reload = useCallback(async () => {
-    applyFleet(await loadFleet())
+    applyFleet(await loadFleet(showArchived))
     setRefreshKey(k => k + 1)
-  }, [applyFleet])
+  }, [applyFleet, showArchived])
 
   async function refresh() {
     setRefreshing(true)
@@ -63,20 +68,20 @@ export default function VehiclesPage() {
 
   useEffect(() => {
     let cancelled = false
-    loadFleet().then(fleet => {
+    loadFleet(showArchived).then(fleet => {
       if (cancelled) return
       applyFleet(fleet)
-      setLoading(false)
+      setLoadedView(showArchived)
     })
-    // Actualiza posición y estado en vivo cada minuto.
-    const interval = setInterval(() => {
-      loadFleet().then(fleet => { if (!cancelled) applyFleet(fleet) })
+    // Actualiza posición y estado en vivo cada minuto (solo activos).
+    const interval = showArchived ? null : setInterval(() => {
+      loadFleet(false).then(fleet => { if (!cancelled) applyFleet(fleet) })
     }, POLL_MS)
     return () => {
       cancelled = true
-      clearInterval(interval)
+      if (interval) clearInterval(interval)
     }
-  }, [applyFleet])
+  }, [applyFleet, showArchived])
 
   function openNew() {
     setEditVehicle(null)
@@ -86,6 +91,15 @@ export default function VehiclesPage() {
   function openEdit(v: Vehicle) {
     setEditVehicle(v)
     setModalOpen(true)
+  }
+
+  async function restore(v: Vehicle) {
+    const { error } = await supabase.from('vehicles').update({ active: true }).eq('id', v.id)
+    if (error) {
+      window.alert(`No se pudo restaurar: ${error.message}`)
+      return
+    }
+    await reload()
   }
 
   const title = isAdmin ? 'Vehículos' : vehicles.length === 1 ? 'Mi vehículo' : 'Mis vehículos'
@@ -100,14 +114,30 @@ export default function VehiclesPage() {
           </h1>
           {isAdmin && (
             <p className="text-sm text-muted-foreground">
-              {vehicles.length} vehículo{vehicles.length !== 1 ? 's' : ''}
+              {vehicles.length} vehículo{vehicles.length !== 1 ? 's' : ''}{showArchived ? ` archivado${vehicles.length !== 1 ? 's' : ''}` : ''}
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          {isAdmin && (
+            <div className="inline-flex rounded-md border bg-background p-0.5" role="group" aria-label="Filtrar vehículos">
+              {([false, true] as const).map(archivedView => (
+                <button
+                  key={String(archivedView)}
+                  className={`px-3 h-8 text-sm rounded-[5px] transition-colors ${showArchived === archivedView ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  aria-pressed={showArchived === archivedView}
+                  onClick={() => setShowArchived(archivedView)}
+                >
+                  {archivedView ? 'Archivados' : 'Activos'}
+                </button>
+              ))}
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} title="Actualizar" aria-label="Actualizar">
             <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
           </Button>
+          {!showArchived && (
+          <>
           <Button
             variant="outline"
             size="sm"
@@ -124,6 +154,8 @@ export default function VehiclesPage() {
               Agregar
             </Button>
           )}
+          </>
+          )}
         </div>
       </div>
 
@@ -136,7 +168,9 @@ export default function VehiclesPage() {
       ) : vehicles.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
           <Truck size={40} className="mx-auto mb-3 opacity-30" />
-          {isAdmin ? (
+          {showArchived ? (
+            <p className="font-medium">No hay vehículos archivados</p>
+          ) : isAdmin ? (
             <>
               <p className="font-medium">Sin vehículos registrados</p>
               <p className="text-sm mt-1">Agrega el primer vehículo para comenzar</p>
@@ -163,6 +197,8 @@ export default function VehiclesPage() {
               onEdit={isAdmin ? () => openEdit(v) : undefined}
               onChanged={reload}
               canManage={isAdmin}
+              archived={showArchived}
+              onRestore={isAdmin && showArchived ? () => restore(v) : undefined}
             />
           ))}
         </div>
