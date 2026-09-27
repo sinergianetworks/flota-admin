@@ -215,6 +215,7 @@ select jobname, schedule, active from cron.job where jobname like 'flota-%';
 |---|---|---|
 | `flota-sync-km-hoy` | cada hora (minuto 5) | km del día en curso |
 | `flota-sync-km-ayer` | cada 6 horas | cierra el día anterior |
+| `flota-recordatorios` | cada hora (minuto 10) | envía la alerta diaria de mantenimiento, si hay algo por vencer |
 | `flota-reporte-semanal` | cada hora (minuto 15) | envía el reporte semanal el día configurado |
 
 El cron corre en UTC, pero el día se calcula en `APP_TIMEZONE`. Además, el administrador puede forzar la sincronización del día con el botón ⟳ de la pantalla de vehículos.
