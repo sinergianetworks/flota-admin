@@ -42,7 +42,7 @@ function toForm(s: FleetSettings): Form {
 }
 
 function parseEmails(raw: string): string[] {
-  return [...new Set(raw.split(/[\n,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean))]
+  return [...new Set(raw.split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean))]
 }
 
 // Forma normalizada para comparar si hay cambios sin guardar.
@@ -85,6 +85,7 @@ export default function SettingsPage() {
 
   function update(patch: Partial<Form>) {
     setMessage(null)
+    setTestResult(null)
     setForm(f => ({ ...f, ...patch }))
   }
 
@@ -123,7 +124,16 @@ export default function SettingsPage() {
     const { data, error } = await supabase.from('fleet_settings').update(values).eq('id', true).select('id')
     setSaving(false)
     if (error) {
-      setMessage({ ok: false, text: error.message })
+      if (error.code === '23514') {
+        const text = error.message.includes('notification_emails')
+          ? 'Algún destinatario no es un correo válido o hay más de 50.'
+          : error.message.includes('weekly_report_day')
+            ? 'El día del reporte no es válido.'
+            : 'Algún valor no es válido.'
+        setMessage({ ok: false, text })
+      } else {
+        setMessage({ ok: false, text: error.message })
+      }
       return
     }
     if (!data || data.length === 0) {
@@ -192,9 +202,9 @@ export default function SettingsPage() {
         <Button variant="outline" size="sm" onClick={() => handleTest(kind)} disabled={testing != null || dirty}>
           {testing === kind ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</> : label}
         </Button>
-        {dirty && <p className="text-sm text-muted-foreground">Guarda los cambios para probar con la nueva configuración.</p>}
+        {dirty && <p className="text-sm text-muted-foreground break-all">Guarda los cambios para probar con la nueva configuración.</p>}
         {testResult?.kind === kind && testResult.result && (
-          <p role="status" aria-live="polite" className={`text-sm ${testResult.result.ok ? 'text-green-700' : 'text-red-600'}`}>
+          <p role="status" aria-live="polite" className={`text-sm break-all ${testResult.result.ok ? 'text-green-700' : 'text-red-600'}`}>
             {testResult.result.text}
           </p>
         )}
@@ -236,19 +246,19 @@ export default function SettingsPage() {
         <>
           <Card>
             <CardContent className="pt-6 space-y-3">
-              <h2 className="font-medium flex items-center gap-2"><Users size={16} /> Destinatarios de los correos</h2>
-              <Label htmlFor="notification_emails" className="sr-only">Destinatarios</Label>
+              <h2 id="recipients-title" className="font-medium flex items-center gap-2"><Users size={16} /> Destinatarios de los correos</h2>
               <textarea
                 id="notification_emails"
                 rows={4}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={'flota@tu-empresa.com\njefe.taller@tu-empresa.com'}
                 value={form.emails}
+                aria-labelledby="recipients-title"
                 aria-describedby="notification_emails-help"
                 onChange={e => update({ emails: e.target.value })}
               />
               <p id="notification_emails-help" className="text-xs text-muted-foreground">
-                Un correo por línea (hasta {MAX_EMAILS}). Reciben las alertas diarias y el reporte semanal. Si lo dejas vacío, se envían a los administradores activos.
+                Uno por línea, o separados por comas (hasta {MAX_EMAILS}). Reciben las alertas diarias y el reporte semanal. Si lo dejas vacío, se envían a los administradores activos.
               </p>
             </CardContent>
           </Card>
@@ -275,12 +285,15 @@ export default function SettingsPage() {
                 <Label htmlFor="weekly_report_day">Día de envío</Label>
                 <select
                   id="weekly_report_day"
-                  className="block w-48 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  className="block w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   value={form.weeklyDay}
                   onChange={e => update({ weeklyDay: Number(e.target.value) })}
                 >
                   {WEEKDAYS.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  Si cambias el día después de que salió el reporte de esta semana, puede llegar un segundo reporte en la semana.
+                </p>
               </div>
               {testButton('weekly', 'Probar reporte semanal')}
             </CardContent>
@@ -294,9 +307,9 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex items-center justify-end gap-3 flex-wrap">
             {message && (
-              <p role="status" aria-live="polite" className={`text-sm ${message.ok ? 'text-green-700' : 'text-red-600'}`}>
+              <p role="status" aria-live="polite" className={`text-sm break-all ${message.ok ? 'text-green-700' : 'text-red-600'}`}>
                 {message.text}
               </p>
             )}
