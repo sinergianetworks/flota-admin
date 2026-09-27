@@ -15,7 +15,7 @@
 | Tema | Decisión |
 |---|---|
 | Contenido del diario | Solo mantenimiento (km y fecha). El seguro sale del diario y pasa al semanal. |
-| Estimación de días | Promedio de km por día de los últimos 28 días (`vehicle_daily_mileage`). Se estima si el vehículo tiene GPS, al menos 7 días con registro y promedio > 0. No se estima en los vencidos. |
+| Estimación de días | Promedio de km por día de los últimos 28 días (`vehicle_daily_mileage`). Se estima si el vehículo tiene GPS, al menos 7 días con registro y promedio > 0. No se estima en los vencidos ni cuando el resultado supera los 365 días. |
 | Día del semanal | Configurable: `weekly_report_day` de 1 (lunes) a 7 (domingo), lunes por defecto. Sale a partir de las 7:00 en `APP_TIMEZONE`. |
 | Período del semanal | Los 7 días completos anteriores al día de envío: de `hoy − 7` a `hoy − 1`. |
 | Destinatarios | `fleet_settings.notification_emails` (`text[]`). Si está vacía, se usan los admins activos. La misma lista sirve para los dos correos. |
@@ -74,7 +74,7 @@ runScheduled(db, {
    - si sale bien, registra `sent`. Este registro es best-effort: si falla, no se reenvía.
 5. Todas las filas de `reminder_log` llevan su `kind`.
 
-Las comprobaciones previas las hace cada función **antes** de llamar a `runScheduled`:
+Las comprobaciones previas las hace cada función **antes** de llamar a `runScheduled`. Por eso un fallo al leer `fleet_settings` responde 500 sin reservar el día ni registrar nada, y la hora siguiente reintenta:
 - secreto del cron;
 - `RESEND_API_KEY` vacío → `not_configured`;
 - hora antes de las 7:00 → `hour`;
