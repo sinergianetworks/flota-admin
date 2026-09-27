@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useMatch } from 'react-router-dom'
 import { useState } from 'react'
-import { Truck, Users, LogOut, Menu, KeyRound } from 'lucide-react'
+import { Truck, Users, LogOut, Menu, KeyRound, Settings } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { config } from '@/lib/config'
@@ -31,6 +31,7 @@ export default function Layout() {
   const nav = [
     { to: '/vehiculos', icon: Truck, label: 'Vehículos', show: true },
     { to: '/usuarios', icon: Users, label: 'Usuarios', show: isAdmin },
+    { to: '/configuracion', icon: Settings, label: 'Configuración', show: isAdmin },
   ].filter(item => item.show)
 
   const sidebarContent = (onNavClick?: () => void) => (

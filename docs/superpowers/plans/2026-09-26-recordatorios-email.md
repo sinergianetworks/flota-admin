@@ -1152,6 +1152,7 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
   const one = (row: unknown) => single ? (row ? Response.json(row) : new Response(null, { status: 406 })) : Response.json(row ? [row] : [])
 
   if (url.pathname === '/resend/emails') {
+    assertEquals(req.headers.get('authorization'), 'Bearer re_test')
     if (state.resendFails) return new Response('{"message":"dominio no verificado"}', { status: 403 })
     state.emails.push(await req.json())
     return Response.json({ id: 'email_1' })
@@ -1168,11 +1169,15 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
     case '/rest/v1/profiles':
       if (url.searchParams.get('id') === 'eq.u-admin') return one({ role: 'admin', active: true })
       return Response.json(state.admins)
+    case '/rest/v1/rpc/flota_claim_reminder_day': {
+      // Misma semántica que la función SQL: reclama si no existe o está en error.
+      const { p_date } = await req.json()
+      const row = state.log.get(p_date)
+      if (row && row.status !== 'error') return Response.json(false)
+      state.log.set(p_date, { local_date: p_date, status: 'sending' })
+      return Response.json(true)
+    }
     case '/rest/v1/reminder_log': {
-      if (req.method === 'GET') {
-        const date = (url.searchParams.get('local_date') ?? '').replace('eq.', '')
-        return one(state.log.get(date) ?? null)
-      }
       const body = await req.json()
       for (const row of Array.isArray(body) ? body : [body]) state.log.set(row.local_date, row)
       return new Response(null, { status: 201 })
@@ -1248,6 +1253,19 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.log.get('2026-09-26')?.status, 'sent')
     })
 
+    await t.step('corte de red al enviar: queda en sending y no se reintenta', async () => {
+      resetState()
+      // Puerto cerrado: la conexión se rechaza (error de red, no respuesta HTTP).
+      Deno.env.set('RESEND_API_URL', 'http://127.0.0.1:1/emails')
+      const res = await at(SIETE)(cron())
+      Deno.env.set('RESEND_API_URL', `${BASE}/resend/emails`)
+      assertEquals(res.status, 502)
+      assertEquals(state.log.get('2026-09-26')?.status, 'sending')
+      const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
+      assertEquals(retry.skipped, 'already_sent')
+      assertEquals(state.emails.length, 0)
+    })
+
     await t.step('secreto equivocado y sin sesión: 401', async () => {
       const req = new Request('http://f', { method: 'POST', headers: { 'x-cron-secret': 'otro' }, body: '{}' })
       assertEquals((await at(SIETE)(req)).status, 401)
@@ -1291,11 +1309,11 @@ import { isCronRequest } from '../_shared/cron.ts'
 import { appTimeZone, dateInTz, hourInTz } from '../_shared/time.ts'
 import { computeReminders, type ReminderSettings } from '../_shared/reminders.ts'
 import { buildReminderEmail } from '../_shared/reminder_email.ts'
-import { emailConfig, sendEmail } from '../_shared/resend.ts'
+import { emailConfig, sendEmail, ResendHttpError } from '../_shared/resend.ts'
 
 const SEND_HOUR = 7
 
-type Status = 'sent' | 'nothing_to_send' | 'disabled' | 'error'
+type Status = 'sending' | 'sent' | 'nothing_to_send' | 'disabled' | 'error'
 
 interface Deps {
   now: () => Date
@@ -1324,8 +1342,11 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
 
     if (!test) {
       if (hourInTz(now, tz) < SEND_HOUR) return json({ skipped: 'hour', today })
-      const { data: done } = await db.from('reminder_log').select('status').eq('local_date', today).maybeSingle()
-      if (done && done.status !== 'error') return json({ skipped: 'already_sent', today })
+      // Reclama el día de forma atómica: true solo si no existía o quedó en error.
+      // Un 'sending' colgado cuenta como "posiblemente enviado" y no se reintenta.
+      const { data: claimed, error: cErr } = await db.rpc('flota_claim_reminder_day', { p_date: today })
+      if (cErr) throw new HttpError(500, `No se pudo reservar el envío del día: ${cErr.message}`)
+      if (!claimed) return json({ skipped: 'already_sent', today })
     }
 
     const { data: settingsRow, error: sErr } = await db
@@ -1360,14 +1381,21 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
       recipients = (admins ?? []).map(a => a.email).filter(Boolean)
     }
 
+    // Si falla antes de llamar a Resend, o Resend responde con error HTTP, el
+    // correo NO salió: el día queda en 'error' y la hora siguiente reintenta.
+    // Un timeout o corte de red DURANTE el envío es "posiblemente enviado": el día
+    // queda en 'sending' y no se reintenta, para no duplicar el correo.
+    let attempted = false
     try {
-      if (recipients.length === 0) throw new Error('No hay administradores activos con correo.')
+      if (recipients.length === 0) throw new HttpError(500, 'No hay administradores activos con correo.')
       const cfg = emailConfig()
       const email = buildReminderEmail(items, { appName: cfg.appName, appUrl: cfg.appUrl, today })
+      attempted = true
       await sendEmail(cfg, { to: recipients, ...email })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      if (!test) await log('error', recipients, items.length, message)
+      const possiblySent = attempted && !(e instanceof ResendHttpError)
+      if (!test) await log(possiblySent ? 'sending' : 'error', recipients, items.length, message)
       throw new HttpError(502, message)
     }
 

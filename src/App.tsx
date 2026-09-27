@@ -9,6 +9,7 @@ import PageLoader from './components/PageLoader'
 // Leaflet y recharts: se cargan solo al entrar
 const VehiclesPage = lazy(() => import('./pages/vehicles/VehiclesPage'))
 const UsersPage = lazy(() => import('./pages/users/UsersPage'))
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
 
 export default function App() {
   return (
@@ -31,6 +32,14 @@ export default function App() {
               element={
                 <ProtectedRoute roles={['admin']}>
                   <UsersPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/configuracion"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <SettingsPage />
                 </ProtectedRoute>
               }
             />

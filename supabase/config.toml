@@ -427,3 +427,6 @@ verify_jwt = false
 
 [functions.sync-mileage]
 verify_jwt = false
+
+[functions.send-reminders]
+verify_jwt = false

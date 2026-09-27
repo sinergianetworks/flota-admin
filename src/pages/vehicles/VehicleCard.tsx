@@ -13,6 +13,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import VehicleLogModal from './VehicleLogModal'
 import VehicleMileageChart from './VehicleMileageChart'
 import { useOdometer } from './useOdometer'
+import { useFleetSettings } from '@/lib/settings'
 
 interface Props {
   vehicle: Vehicle
@@ -68,16 +69,18 @@ function MovementBadge({ vehicle, status }: { vehicle: Vehicle; status: LiveStat
 // Intervalo asumido para la barra de progreso: 10.000 km
 const SERVICE_INTERVAL_KM = 10_000
 
-function MaintenanceBar({ vehicle, odometer }: { vehicle: Vehicle; odometer: number }) {
-  if (vehicle.next_maintenance_km == null) return null
+function MaintenanceBar({ vehicle, odometer, hasData, thresholdKm }: { vehicle: Vehicle; odometer: number; hasData: boolean; thresholdKm: number }) {
+  if (vehicle.next_maintenance_km == null || !hasData) return null
 
   const remaining = Number(vehicle.next_maintenance_km) - odometer
   const overdue = remaining <= 0
   const pct = overdue ? 0 : Math.min(100, (remaining / SERVICE_INTERVAL_KM) * 100)
+  // Rojo en el último tercio del umbral (con 2.000 km: desde 667 km).
+  const urgentKm = Math.ceil(thresholdKm / 3)
 
-  const tone = overdue || remaining < 700
+  const tone = overdue || remaining <= urgentKm
     ? { bar: 'bg-red-500', text: 'text-red-600', note: 'Mantenimiento urgente', Icon: AlertCircle as React.ElementType | null }
-    : remaining < 2000
+    : remaining <= thresholdKm
       ? { bar: 'bg-amber-400', text: 'text-amber-600', note: 'Próximo pronto', Icon: Wrench as React.ElementType | null }
       : { bar: 'bg-green-500', text: 'text-green-700', note: 'Al día', Icon: null }
 
@@ -112,19 +115,42 @@ function daysUntil(dateStr: string): number {
   return Math.round((target - today) / 86_400_000)
 }
 
-function InsuranceRow({ vehicle }: { vehicle: Vehicle }) {
+function MaintenanceDateRow({ vehicle, thresholdDays }: { vehicle: Vehicle; thresholdDays: number }) {
+  if (!vehicle.next_maintenance_date) return null
+  const daysLeft = daysUntil(vehicle.next_maintenance_date)
+  if (daysLeft > thresholdDays) return null
+
+  const tone = daysLeft < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+  const text = daysLeft < 0
+    ? `Mantenimiento vencido hace ${-daysLeft} día${daysLeft === -1 ? '' : 's'}`
+    : daysLeft === 0
+      ? 'Mantenimiento programado para hoy'
+      : `Mantenimiento en ${daysLeft} día${daysLeft === 1 ? '' : 's'}`
+
+  return (
+    <div className={`flex items-start gap-1.5 text-xs rounded px-2 py-1.5 ${tone}`}>
+      <Wrench size={12} className="mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="font-medium">{text}</p>
+        <p>{formatDate(vehicle.next_maintenance_date)}</p>
+      </div>
+    </div>
+  )
+}
+
+function InsuranceRow({ vehicle, thresholdDays }: { vehicle: Vehicle; thresholdDays: number }) {
   if (!vehicle.insurance_company && !vehicle.insurance_policy && !vehicle.insurance_expiry && !vehicle.insurance_doc_url) {
     return null
   }
   const daysLeft = vehicle.insurance_expiry ? daysUntil(vehicle.insurance_expiry) : null
-  const tone = daysLeft == null || daysLeft > 30
+  const tone = daysLeft == null || daysLeft > thresholdDays
     ? 'bg-gray-50 text-gray-600'
     : daysLeft <= 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
 
   const expiryText = daysLeft == null
     ? null
     : daysLeft <= 0 ? 'Vencido'
-      : daysLeft <= 30 ? `Vence en ${daysLeft} día${daysLeft !== 1 ? 's' : ''}`
+      : daysLeft <= thresholdDays ? `Vence en ${daysLeft} día${daysLeft !== 1 ? 's' : ''}`
         : `Vence ${formatDate(vehicle.insurance_expiry)}`
 
   return (
@@ -177,6 +203,7 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
 
   const photoUrl = useSignedUrl(PHOTOS_BUCKET, vehicle.photo_url)
   const odometer = useOdometer(vehicle, refreshKey + logVersion)
+  const settings = useFleetSettings()
   const hasGps = !!vehicle.gps_device_id
 
   const lat = status?.lat ?? null
@@ -296,8 +323,9 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
               </div>
             ) : null}
 
-            <MaintenanceBar vehicle={vehicle} odometer={odometer.km} />
-            <InsuranceRow vehicle={vehicle} />
+            <MaintenanceBar vehicle={vehicle} odometer={odometer.km} hasData={odometer.hasData} thresholdKm={settings.maintenance_km_threshold} />
+            <MaintenanceDateRow vehicle={vehicle} thresholdDays={settings.maintenance_days_threshold} />
+            <InsuranceRow vehicle={vehicle} thresholdDays={settings.insurance_days_threshold} />
           </div>
 
           {showChart && (

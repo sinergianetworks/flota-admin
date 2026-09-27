@@ -62,11 +62,11 @@ npx supabase@latest db push
 
 La base queda con:
 
-- tablas `profiles`, `vehicles`, `vehicle_log`, `vehicle_daily_mileage` y `gps_cache`, con sus políticas RLS;
+- tablas `profiles`, `vehicles`, `vehicle_log`, `vehicle_daily_mileage`, `gps_cache`, `fleet_settings` y `reminder_log`, con sus políticas RLS, y la vista `vehicle_odometer`;
 - buckets privados `vehicle-photos` y `vehicle-docs`;
 - las extensiones `pg_cron` y `pg_net`, y los jobs de sincronización. Estos quedan inactivos hasta el paso 8.
 
-Para verificar: en *Table Editor* deben aparecer las 5 tablas, y en *Storage* los 2 buckets.
+Para verificar: en *Table Editor* deben aparecer las 7 tablas y la vista `vehicle_odometer`, y en *Storage* los 2 buckets.
 
 ## 3. Desplegar las edge functions
 
@@ -74,9 +74,9 @@ Para verificar: en *Table Editor* deben aparecer las 5 tablas, y en *Storage* lo
 npx supabase@latest functions deploy --use-api
 ```
 
-Despliega `create-user`, `gps-status` y `sync-mileage`. `--use-api` empaqueta en los servidores de Supabase, así que no necesitas Docker.
+Despliega `create-user`, `gps-status`, `sync-mileage` y `send-reminders`. `--use-api` empaqueta en los servidores de Supabase, así que no necesitas Docker.
 
-Las tres funciones se despliegan con **Verify JWT desactivado** (lo define `supabase/config.toml`), porque cada una valida la sesión en su propio código. En *Edge Functions* del panel deben verse las tres, con *Verify JWT* en **off**.
+Las cuatro funciones se despliegan con **Verify JWT desactivado** (lo define `supabase/config.toml`), porque cada una valida la sesión en su propio código. En *Edge Functions* del panel deben verse las cuatro, con *Verify JWT* en **off**.
 
 ## 4. Configurar los secrets de las funciones
 
@@ -182,9 +182,9 @@ Entra a `https://<tu-dominio>` con el administrador del paso 5. Ya puedes agrega
 
 Para agregar otro proveedor, consulta [PROVEEDORES_GPS.md](PROVEEDORES_GPS.md).
 
-## 8. Activar el cron de kilometraje
+## 8. Activar los jobs programados (kilometraje y recordatorios)
 
-Los jobs ya existen desde el paso 2, pero no hacen nada hasta que se guardan la URL del proyecto y el secreto en **Vault**. En *SQL Editor* ejecuta, una sola vez:
+Los jobs ya existen desde el paso 2, pero no hacen nada hasta que se guardan la URL del proyecto y el secreto en **Vault**. Esto es necesario tanto para el cron de kilometraje como para los recordatorios por correo del paso 9, aunque no uses GPS. En *SQL Editor* ejecuta, una sola vez:
 
 ```sql
 select vault.create_secret('https://<tu-project-ref>.supabase.co', 'flota_project_url');
@@ -218,19 +218,61 @@ select jobname, schedule, active from cron.job where jobname like 'flota-%';
 
 El cron corre en UTC, pero el día se calcula en `APP_TIMEZONE`. Además, el administrador puede forzar la sincronización del día con el botón ⟳ de la pantalla de vehículos.
 
+## 9. Recordatorios por correo (opcional)
+
+Todos los días, a partir de las 7:00 (hora de `APP_TIMEZONE`), Flota Admin envía a los administradores activos un resumen con:
+
+- los mantenimientos próximos o vencidos, por kilometraje y por fecha;
+- los seguros por vencer o vencidos.
+
+El aviso se repite cada día hasta que se actualiza el dato en la app. Si no hay nada que avisar, no se envía correo.
+
+> Requiere los secretos de Vault del paso 8, aunque no uses GPS. Mientras no completes `RESEND_API_KEY` (más abajo), el job no hace nada: no se envían correos ni se registran errores.
+
+1. Crea una cuenta en [Resend](https://resend.com):
+   - *Domains → Add domain*: agrega los registros DNS que indica y espera a que el dominio quede **verificado**.
+   - *API Keys → Create*: genera una key con permiso de envío.
+2. Completa en `supabase/functions/.env` `RESEND_API_KEY`, `EMAIL_FROM` (con el dominio verificado) y `APP_URL`, y súbelos:
+
+   ```bash
+   npx supabase@latest secrets set --env-file supabase/functions/.env
+   ```
+
+3. En la app, entra a **Configuración**:
+   - ajusta los umbrales, si quieres;
+   - pulsa **Enviar correo de prueba**: te llega a tu dirección con los vencimientos de hoy.
+
+El job `flota-recordatorios` usa los mismos secretos de Vault que el cron de kilometraje (paso 8), así que no hace falta nada más. Para revisar los envíos:
+
+```sql
+select local_date, status, item_count, recipients, error
+from public.reminder_log
+order by local_date desc
+limit 10;
+```
+
+| status | Significado |
+|---|---|
+| `sent` | Correo enviado. |
+| `nothing_to_send` | No había vencimientos ese día; no se envió correo. |
+| `disabled` | Los recordatorios estaban desactivados en Configuración. |
+| `error` | No se pudo enviar (ver columna `error`); se reintenta cada hora ese día. |
+| `sending` | Envío en curso, o posiblemente enviado si quedó así (corte de red o error al registrar); no se reintenta para no duplicar. |
+
 ---
 
 ## Lista de verificación
 
 - [ ] Registro público desactivado (paso 1).
-- [ ] `db push` sin errores; 5 tablas y 2 buckets (paso 2).
-- [ ] 3 funciones desplegadas con *Verify JWT* en off (paso 3).
+- [ ] `db push` sin errores; 7 tablas, la vista `vehicle_odometer` y 2 buckets (paso 2).
+- [ ] 4 funciones desplegadas con *Verify JWT* en off (paso 3).
 - [ ] `secrets list` muestra `APP_TIMEZONE` y `SYNC_CRON_SECRET` (paso 4).
 - [ ] El administrador inicia sesión y ve **Vehículos** y **Usuarios** (pasos 5 y 6).
 - [ ] *Site URL* y *Redirect URLs* configuradas (paso 6).
 - [ ] Un conductor de prueba ve solo el vehículo que tiene asignado.
 - [ ] (GPS) El proveedor aparece configurado y el mapa muestra la posición (paso 7).
-- [ ] (GPS) `flota_request_mileage_sync('today')` responde 200 (paso 8).
+- [ ] `flota_request_mileage_sync('today')` responde 200 (paso 8).
+- [ ] (Correo) El correo de prueba llega desde **Configuración** (paso 9).
 
 ## Problemas frecuentes
 
@@ -244,5 +286,9 @@ El cron corre en UTC, pero el día se calcula en `APP_TIMEZONE`. Además, el adm
 | `sync-mileage` responde **401** desde el cron | `flota_sync_secret` en Vault no es igual a `SYNC_CRON_SECRET`, o tiene menos de 16 caracteres. |
 | El proveedor aparece **"(sin configurar)"** | Falta alguno de los secrets `TRACKSOLID_*`. |
 | El enlace de recuperación de contraseña lleva a otro sitio | *Site URL* y *Redirect URLs* (paso 6). |
+| Los recordatorios no llegan y `reminder_log` no tiene filas | Sin `RESEND_API_KEY` el job no hace nada (no es un error): completa el paso 9. |
+| **"Faltan secrets para enviar correos"** al pulsar *Enviar correo de prueba* | Falta `RESEND_API_KEY`, `EMAIL_FROM` o `APP_URL` (paso 9). |
+| **"Resend (403)"** al enviar la prueba | El dominio de `EMAIL_FROM` no está verificado en Resend. |
+| `reminder_log` en `error` con `APP_URL debe empezar con http:// o https://` | Corrige el secret `APP_URL`. |
 
 Para ver errores de las funciones: *Edge Functions → (función) → Logs*. Para ver las llamadas del cron: `select * from net._http_response order by created desc;`.

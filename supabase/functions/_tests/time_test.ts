@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1'
-import { dayRangeUtc, resolveDate, startOfDayUtc, isValidDate } from '../_shared/time.ts'
+import { dayRangeUtc, resolveDate, startOfDayUtc, isValidDate, hourInTz, daysBetween } from '../_shared/time.ts'
 
 Deno.test('día en UTC-4 fijo coincide con el rango que usaba la versión anterior', () => {
   // Antes: begin = "<fecha> 04:00:00", end = "<fecha+1> 03:59:59" (UTC)
@@ -45,4 +45,18 @@ Deno.test('resolveDate rechaza fechas inválidas', () => {
   assertThrows(() => resolveDate('2026-02-30', 'UTC'))
   assertThrows(() => resolveDate('ayer', 'UTC'))
   assertEquals(isValidDate('2026-13-01'), false)
+})
+
+Deno.test('hourInTz: hora local 0-23', () => {
+  // 11:30 UTC = 07:30 en UTC-4
+  assertEquals(hourInTz(new Date('2026-09-26T11:30:00Z'), 'America/La_Paz'), 7)
+  assertEquals(hourInTz(new Date('2026-09-26T03:59:00Z'), 'America/La_Paz'), 23)
+  assertEquals(hourInTz(new Date('2026-09-26T04:00:00Z'), 'America/La_Paz'), 0)
+})
+
+Deno.test('daysBetween: días de calendario', () => {
+  assertEquals(daysBetween('2026-09-26', '2026-10-01'), 5)
+  assertEquals(daysBetween('2026-09-26', '2026-09-26'), 0)
+  assertEquals(daysBetween('2026-09-26', '2026-09-20'), -6)
+  assertEquals(daysBetween('2026-02-28', '2026-03-01'), 1)
 })

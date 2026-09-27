@@ -5,7 +5,9 @@
 import { createClient, type SupabaseClient, type User } from 'npm:@supabase/supabase-js@2'
 import { HttpError } from './http.ts'
 
-export const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
+function supabaseUrl(): string {
+  return Deno.env.get('SUPABASE_URL') ?? ''
+}
 
 // Lee una key nueva (JSON { nombre: key }) con fallback a la legacy.
 function readKey(newVar: string, legacyVar: string): string {
@@ -20,11 +22,9 @@ function readKey(newVar: string, legacyVar: string): string {
   return Deno.env.get(legacyVar) ?? ''
 }
 
-export const SECRET_KEY = readKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
-
 // Cliente con la secret key: ignora la RLS. Usar solo después de autorizar.
 export function adminClient(): SupabaseClient {
-  return createClient(SUPABASE_URL, SECRET_KEY, {
+  return createClient(supabaseUrl(), readKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY'), {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 }
@@ -71,7 +71,7 @@ export async function requireAdmin(req: Request, admin = adminClient()): Promise
 // Cliente que actúa como el usuario que llama: respeta su RLS.
 export function userClient(token: string): SupabaseClient {
   const publishable = readKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
-  return createClient(SUPABASE_URL, publishable, {
+  return createClient(supabaseUrl(), publishable, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   })
