@@ -20,6 +20,7 @@ export interface MileageRow {
 
 export type MaintenanceInfo =
   | { kind: 'km'; remainingKm: number }
+  | { kind: 'km_unknown'; dueKm: number }
   | { kind: 'date'; remainingDays: number; date: string }
   | null
 
@@ -46,7 +47,14 @@ export interface WeeklyReport {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 export function buildWeeklyReport(
-  input: { vehicles: WeeklyVehicle[]; odometers: OdometerRow[]; mileage: MileageRow[] },
+  input: {
+    vehicles: WeeklyVehicle[]
+    odometers: OdometerRow[]
+    // Debe cubrir de `today - 28` a `today - 1`: se usa tanto para los km de
+    // la semana (últimos 7 días) como para el promedio de las estimaciones
+    // (últimos 28 días, ver `averageKmPerDay`).
+    mileage: MileageRow[]
+  },
   settings: ReminderSettings,
   today: string,
 ): WeeklyReport {
@@ -56,8 +64,10 @@ export function buildWeeklyReport(
 
   const mileageByVehicle = new Map<string, { date: string; km: number }[]>()
   for (const m of input.mileage) {
+    const km = Number(m.km)
+    if (!Number.isFinite(km)) continue
     const list = mileageByVehicle.get(m.vehicle_id) ?? []
-    list.push({ date: m.date, km: Number(m.km) })
+    list.push({ date: m.date, km })
     mileageByVehicle.set(m.vehicle_id, list)
   }
   const averages = new Map<string, number>()
@@ -74,15 +84,31 @@ export function buildWeeklyReport(
       const maintenanceAlerts = computeReminders([v], input.odometers, settings, today, averages)
       const insuranceAlerts = computeInsuranceAlerts([v], settings, today)
 
-      const km: MaintenanceInfo = v.next_maintenance_km != null && hasOdo && Number(v.next_maintenance_km) > 0
-        ? { kind: 'km', remainingKm: Math.round(Number(v.next_maintenance_km) - Number(odo!.odometer_km)) }
+      const dueKmNum = v.next_maintenance_km != null ? Number(v.next_maintenance_km) : null
+      const hasDueKm = dueKmNum != null && dueKmNum > 0
+      const km: MaintenanceInfo = hasDueKm && hasOdo
+        ? { kind: 'km', remainingKm: Math.round(dueKmNum! - Number(odo!.odometer_km)) }
         : null
       const byDate: MaintenanceInfo = v.next_maintenance_date
         ? { kind: 'date', remainingDays: daysBetween(today, v.next_maintenance_date), date: v.next_maintenance_date }
         : null
-      const dateAlert = maintenanceAlerts.some(a => a.kind === 'maintenance_date')
-      const kmAlert = maintenanceAlerts.some(a => a.kind === 'maintenance_km')
-      const maintenance = km && byDate ? (dateAlert && !kmAlert ? byDate : km) : (km ?? byDate)
+      // Si hay km sin datos de odómetro (y no hay fecha), mostramos el km
+      // objetivo con la marca de "sin odómetro" (ver weekly_email.ts).
+      const kmUnknown: MaintenanceInfo = hasDueKm && !hasOdo && !byDate
+        ? { kind: 'km_unknown', dueKm: Math.round(dueKmNum!) }
+        : null
+      const kmAlertItem = maintenanceAlerts.find(a => a.kind === 'maintenance_km')
+      const dateAlertItem = maintenanceAlerts.find(a => a.kind === 'maintenance_date')
+      const kmAlert = !!kmAlertItem
+      const kmOverdue = !!kmAlertItem?.overdue
+      const dateAlert = !!dateAlertItem
+      const dateOverdue = byDate != null && byDate.kind === 'date' && byDate.remainingDays < 0
+      // Con km y fecha, se prefiere la fecha cuando ella está en alerta (o
+      // vencida) y el km no lo está; en el resto de los casos, el km. Sin
+      // km (o sin odómetro), se usa la fecha; sin fecha, el km (o
+      // "sin odómetro" si no hay lectura de odómetro).
+      const showDateOverKm = (dateAlert && !kmAlert) || (dateOverdue && !kmOverdue)
+      const maintenance = km && byDate ? (showDateOverKm ? byDate : km) : (km ?? byDate ?? kmUnknown)
 
       const week = mileageByVehicle.get(v.id) ?? []
       const weekKm = v.gps_device_id

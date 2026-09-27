@@ -21,6 +21,7 @@ function tone(row: WeeklyVehicleRow, kind: ReminderKind): string {
 function maintenanceText(row: WeeklyVehicleRow): { text: string; color: string } {
   const m = row.maintenance
   if (!m) return { text: '—', color: '#9ca3af' }
+  if (m.kind === 'km_unknown') return { text: `a los ${int(m.dueKm)} km (sin odómetro)`, color: '#9ca3af' }
   if (m.kind === 'km') {
     const text = m.remainingKm > 0 ? `faltan ${int(m.remainingKm)} km` : m.remainingKm === 0 ? 'llegó al km' : `pasado por ${int(-m.remainingKm)} km`
     return { text, color: tone(row, 'maintenance_km') }
@@ -35,6 +36,32 @@ function insuranceText(row: WeeklyVehicleRow): { text: string; color: string } {
   const d = date(i.expiry)
   const text = i.remainingDays > 0 ? `vence en ${days(i.remainingDays)} (${d})` : i.remainingDays === 0 ? `vence hoy (${d})` : `vencido hace ${days(-i.remainingDays)} (${d})`
   return { text, color: tone(row, 'insurance') }
+}
+
+// Texto plano del seguro, con la aseguradora entre paréntesis si está.
+function insuranceTextPlain(row: WeeklyVehicleRow): string {
+  const t = insuranceText(row).text
+  const company = row.insurance?.company
+  return company ? `${t} (${company})` : t
+}
+
+// Celda "Vehículo": nombre, luego placa/conductor y odómetro/km de la semana.
+function vehicleCell(row: WeeklyVehicleRow): string {
+  const meta = [row.plate, row.driver].filter((v): v is string => !!v).map(esc).join(' · ')
+  const odo = row.odometerKm != null ? `${int(row.odometerKm)} km` : '—'
+  const week = row.weekKm != null ? `${int(row.weekKm)} km` : 'sin GPS'
+  return `<div style="font-weight:600;color:#111827">${esc(row.name)}</div>`
+    + (meta ? `<div style="font-size:12px;color:#6b7280">${meta}</div>` : '')
+    + `<div style="font-size:12px;color:#6b7280">Odómetro ${odo} · semana ${week}</div>`
+}
+
+// Celda "Seguro": vencimiento, luego la aseguradora si está.
+function insuranceCell(row: WeeklyVehicleRow): string {
+  const i = row.insurance
+  if (!i) return `<span style="color:#9ca3af">—</span>`
+  const t = insuranceText(row)
+  const company = i.company ? `<div style="font-size:12px;color:#6b7280">${esc(i.company)}</div>` : ''
+  return `<span style="color:${t.color}">${esc(t.text)}</span>${company}`
 }
 
 const TH = 'padding:8px 10px;border-bottom:2px solid #e5e7eb;text-align:left;font-size:12px;color:#6b7280;font-weight:600'
@@ -66,22 +93,18 @@ export function buildWeeklyEmail(report: WeeklyReport, opts: WeeklyEmailOptions)
 
   const rows = report.rows.map(r => {
     const m = maintenanceText(r)
-    const i = insuranceText(r)
     return `
       <tr>
-        <td style="${TD};font-weight:600;color:#111827">${esc(r.name)}${r.plate ? `<div style="font-weight:400;font-size:12px;color:#6b7280">${esc(r.plate)}</div>` : ''}</td>
-        <td style="${TD};color:#374151">${esc(r.driver ?? '—')}</td>
-        <td style="${TD};color:#374151;white-space:nowrap">${r.odometerKm != null ? `${int(r.odometerKm)} km` : '—'}</td>
-        <td style="${TD};color:#374151;white-space:nowrap">${r.weekKm != null ? `${int(r.weekKm)} km` : 'sin GPS'}</td>
+        <td style="${TD}">${vehicleCell(r)}</td>
         <td style="${TD};color:${m.color}">${esc(m.text)}</td>
-        <td style="${TD};color:${i.color}">${esc(i.text)}</td>
+        <td style="${TD}">${insuranceCell(r)}</td>
       </tr>`
   }).join('')
 
   const table = `
     <h2 style="margin:24px 0 8px;font-size:16px;color:#111827">Vehículos</h2>
-    <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse">
-      <tr><th style="${TH}">Vehículo</th><th style="${TH}">Conductor</th><th style="${TH}">Odómetro</th><th style="${TH}">Km semana</th><th style="${TH}">Próx. mantenimiento</th><th style="${TH}">Seguro</th></tr>${rows}
+    <table cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse">
+      <tr><th style="${TH}">Vehículo</th><th style="${TH}">Próx. mantenimiento</th><th style="${TH}">Seguro</th></tr>${rows}
     </table>`
 
   const html = emailShell({ appName: opts.appName, subtitle: `Reporte semanal · ${period}`, body: summary + attention + table, url, footer })
@@ -96,7 +119,7 @@ export function buildWeeklyEmail(report: WeeklyReport, opts: WeeklyEmailOptions)
       const label = r.plate ? `${r.name} (${r.plate})` : r.name
       const odo = r.odometerKm != null ? `${int(r.odometerKm)} km` : '—'
       const week = r.weekKm != null ? `semana ${int(r.weekKm)} km` : 'sin GPS'
-      return `- ${label} · ${r.driver ?? '—'} · ${odo} · ${week} · mant.: ${maintenanceText(r).text} · seguro: ${insuranceText(r).text}`
+      return `- ${label} · ${r.driver ?? '—'} · ${odo} · ${week} · mant.: ${maintenanceText(r).text} · seguro: ${insuranceTextPlain(r)}`
     }),
     '', `Abrir: ${url}`,
     '', footer,

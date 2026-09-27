@@ -76,3 +76,75 @@ Deno.test('alertas: mantenimiento y seguro, ordenadas, con total', () => {
   assertEquals(a.insurance, { expiry: '2026-09-28', remainingDays: 0, company: 'Aseg' })
   assertEquals(a.alerts.length, 2)
 })
+
+Deno.test('mantenimiento: km y fecha en alerta (ninguno vencido) → km', () => {
+  const r = buildWeeklyReport({
+    vehicles: [veh({ id: 'a', next_maintenance_km: 51000, next_maintenance_date: '2026-10-05' })], // +1000km, +7 días
+    odometers: [{ vehicle_id: 'a', odometer_km: 50000, has_data: true }],
+    mileage: [],
+  }, S, TODAY)
+  assertEquals(r.rows[0].maintenance, { kind: 'km', remainingKm: 1000 })
+})
+
+Deno.test('mantenimiento: fecha vencida con km solo próximo (no vencido) → fecha', () => {
+  const r = buildWeeklyReport({
+    vehicles: [veh({ id: 'a', next_maintenance_km: 51000, next_maintenance_date: '2026-09-23' })], // +1000km, -5 días
+    odometers: [{ vehicle_id: 'a', odometer_km: 50000, has_data: true }],
+    mileage: [],
+  }, S, TODAY)
+  assertEquals(r.rows[0].maintenance, { kind: 'date', remainingDays: -5, date: '2026-09-23' })
+})
+
+Deno.test('mantenimiento: km sin odómetro y sin fecha → km_unknown', () => {
+  const r = buildWeeklyReport({
+    vehicles: [veh({ id: 'a', next_maintenance_km: 60000 })],
+    odometers: [{ vehicle_id: 'a', odometer_km: 0, has_data: false }],
+    mileage: [],
+  }, S, TODAY)
+  assertEquals(r.rows[0].maintenance, { kind: 'km_unknown', dueKm: 60000 })
+})
+
+Deno.test('mantenimiento: km sin odómetro con fecha → fecha', () => {
+  const r = buildWeeklyReport({
+    vehicles: [veh({ id: 'a', next_maintenance_km: 60000, next_maintenance_date: '2027-01-01' })],
+    odometers: [{ vehicle_id: 'a', odometer_km: 0, has_data: false }],
+    mileage: [],
+  }, S, TODAY)
+  assertEquals(r.rows[0].maintenance, { kind: 'date', remainingDays: 95, date: '2027-01-01' })
+})
+
+Deno.test('estimatedDays: solo con GPS y al menos 7 días de kilometraje', () => {
+  const week = ['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-26', '2026-09-27']
+  const mileage = week.flatMap(date => [
+    { vehicle_id: 'gps', date, km: 50 },
+    { vehicle_id: 'nogps', date, km: 50 },
+  ])
+  const r = buildWeeklyReport({
+    vehicles: [
+      veh({ id: 'gps', name: 'Gps', next_maintenance_km: 50500, gps_device_id: '1' }),
+      veh({ id: 'nogps', name: 'NoGps', next_maintenance_km: 50500, gps_device_id: null }),
+    ],
+    odometers: [
+      { vehicle_id: 'gps', odometer_km: 50000, has_data: true },
+      { vehicle_id: 'nogps', odometer_km: 50000, has_data: true },
+    ],
+    mileage,
+  }, S, TODAY)
+  const gpsAlert = r.attention.find(a => a.vehicleId === 'gps')
+  const noGpsAlert = r.attention.find(a => a.vehicleId === 'nogps')
+  assertEquals(gpsAlert?.estimatedDays, 40)
+  assertEquals(noGpsAlert?.estimatedDays, undefined)
+})
+
+Deno.test('km no finito en el kilometraje se ignora', () => {
+  const r = buildWeeklyReport({
+    vehicles: [veh({ id: 'a', gps_device_id: '1' })],
+    odometers: [],
+    mileage: [
+      { vehicle_id: 'a', date: '2026-09-27', km: 100 },
+      { vehicle_id: 'a', date: '2026-09-26', km: NaN },
+      { vehicle_id: 'a', date: '2026-09-25', km: 'no-es-numero' as unknown as number },
+    ],
+  }, S, TODAY)
+  assertEquals(r.rows[0].weekKm, 100)
+})

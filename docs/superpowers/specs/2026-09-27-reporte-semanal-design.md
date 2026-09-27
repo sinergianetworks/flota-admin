@@ -108,7 +108,7 @@ Se leen con el service role:
 - `fleet_settings`;
 - vehículos activos: `id, name, plate, next_maintenance_km, next_maintenance_date, insurance_company, insurance_expiry, gps_device_id`, más `driver:profiles(full_name)`;
 - `vehicle_odometer`;
-- `vehicle_daily_mileage` del período.
+- `vehicle_daily_mileage` de `hoy−28` a `hoy−1`: sirve para los km de la semana y para las estimaciones.
 
 ### Cálculo (módulo puro `_shared/weekly_report.ts`)
 
@@ -131,7 +131,8 @@ buildWeeklyReport(input, settings, today): {
 ```
 
 - **`maintenance` en la tabla:** se muestra el criterio más cercano.
-  - Si tiene los dos, se muestra el de km, salvo que el de fecha esté vencido o dentro de su umbral y el de km no.
+  - Si tiene los dos, se muestra el de km, salvo que el de fecha esté en alerta y el de km no, o que el de fecha esté vencido y el de km no.
+  - Si hay meta de km pero no hay odómetro ni fecha, se muestra `km_unknown`: "a los X km (sin odómetro)".
   - Si no tiene ninguno, `null`.
 - **Seguro en las alertas:** vencido si faltan ≤ 0 días; próximo si faltan ≤ `insurance_days_threshold`. Es la misma regla que tenía el diario.
 - **`weekKm`:** suma de `vehicle_daily_mileage` entre `hoy−7` y `hoy−1` (vehículos con GPS).
@@ -142,9 +143,10 @@ buildWeeklyReport(input, settings, today): {
 - **Secciones:**
   1. **Resumen:** vehículos activos, km recorridos por la flota y cantidad de alertas.
   2. **Requieren atención:** tabla de vencidos y próximos, con el mismo formato que el diario más el seguro. Si no hay alertas: "Sin alertas esta semana."
-  3. **Vehículos:** tabla con Vehículo (placa), Conductor, Odómetro, Km semana, Próx. mantenimiento y Seguro.
-     - "—" si falta el dato; "sin GPS" en Km semana.
-     - El mantenimiento y el seguro muestran "faltan X km", "en X días (dd/mm)" o "vencido…", en rojo o ámbar según el estado.
+  3. **Vehículos:** tabla de 3 columnas, para que se lea bien en el celular.
+     - **Vehículo:** el nombre y, debajo, la placa, el conductor, el odómetro y los km de la semana.
+     - **Próx. mantenimiento** y **Seguro** (con la aseguradora debajo). Muestran "faltan X km", "en X días (dd/mm/aaaa)" o "vencido…", en rojo o ámbar según el estado.
+     - "—" si falta el dato; "sin GPS" si no hay km de la semana.
   4. **Botón** "Abrir {APP_NAME}", que apunta a `APP_URL/vehiculos`.
   5. **Pie:** "Reporte semanal de la flota. Se envía cada {día} a la lista de avisos."
 - **Versión de texto plano** con el mismo contenido. Todo el contenido que viene de la base se escapa en el HTML.
