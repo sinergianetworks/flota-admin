@@ -46,6 +46,8 @@ const KIND_ORDER: ReminderKind[] = ['insurance', 'maintenance_date', 'maintenanc
 
 const AVG_WINDOW_DAYS = 28
 const MIN_DAYS_WITH_DATA = 7
+// Con un ritmo muy bajo, la estimación no es útil.
+const MAX_ESTIMATE_DAYS = 365
 
 // Promedio de km por día de los últimos 28 días completos (hoy excluido).
 // Los días sin registro cuentan como 0 (el vehículo no se movió). Devuelve
@@ -84,7 +86,10 @@ export function computeReminders(
           const overdue = remaining <= 0
           const avg = avgKmPerDay.get(v.id)
           const item: ReminderItem = { ...base, kind: 'maintenance_km', remaining, overdue, dueKm }
-          if (!overdue && avg && avg > 0) item.estimatedDays = Math.ceil(remaining / avg)
+          if (!overdue && avg != null && avg > 0) {
+            const estimatedDays = Math.ceil(remaining / avg)
+            if (estimatedDays <= MAX_ESTIMATE_DAYS) item.estimatedDays = estimatedDays
+          }
           items.push(item)
         }
       }

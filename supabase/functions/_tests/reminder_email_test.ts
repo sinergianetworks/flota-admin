@@ -24,22 +24,22 @@ Deno.test('describeItem: textos en español', () => {
 
 Deno.test('correo con avisos: asunto, secciones, botón y texto plano', () => {
   const items: ReminderItem[] = [
-    { ...base, kind: 'insurance', remaining: 0, overdue: true, dueDate: '2026-09-26' },
+    { ...base, kind: 'maintenance_date', remaining: 0, overdue: true, dueDate: '2026-09-26' },
     { ...base, kind: 'maintenance_km', remaining: 800, overdue: false, dueKm: 60000 },
   ]
   const e = buildReminderEmail(items, OPTS)
   assertEquals(e.subject, 'Transportes Ejemplo: 2 alertas de mantenimiento — 26/09/2026')
   assertStringIncludes(e.html, 'Vencidos')
   assertStringIncludes(e.html, 'Próximos')
-  assertStringIncludes(e.html, 'Seguro')
+  assertStringIncludes(e.html, 'Mantenimiento (fecha)')
   assertStringIncludes(e.html, 'Mantenimiento (km)')
   assertStringIncludes(e.html, 'href="https://flota.ejemplo.test/vehiculos"')
   assertStringIncludes(e.text, 'VENCIDOS')
-  assertStringIncludes(e.text, '- Pickup (AB-12) · Seguro: vence hoy (26/09/2026)')
+  assertStringIncludes(e.text, '- Pickup (AB-12) · Mantenimiento (fecha): vence hoy (26/09/2026)')
 })
 
 Deno.test('singular y sin avisos', () => {
-  const one = buildReminderEmail([{ ...base, kind: 'insurance', remaining: 5, overdue: false, dueDate: '2026-10-01' }], OPTS)
+  const one = buildReminderEmail([{ ...base, kind: 'maintenance_date', remaining: 5, overdue: false, dueDate: '2026-10-01' }], OPTS)
   assertEquals(one.subject, 'Transportes Ejemplo: 1 alerta de mantenimiento — 26/09/2026')
   assert(!one.html.includes('Vencidos'))
   const none = buildReminderEmail([], OPTS)

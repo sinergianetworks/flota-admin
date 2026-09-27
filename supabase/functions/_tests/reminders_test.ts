@@ -47,7 +47,10 @@ Deno.test('mantenimiento por fecha: límite, vencido y hoy', () => {
 })
 
 Deno.test('vehículos inactivos no avisan', () => {
-  const items = computeReminders([v({ id: 'a', active: false, insurance_expiry: '2026-09-01' })], [], S, TODAY)
+  const items = computeReminders([
+    v({ id: 'a', active: false, next_maintenance_date: '2026-09-01' }),
+    v({ id: 'b', active: false, next_maintenance_km: 9500 }),
+  ], [odo('b', 10000)], S, TODAY)
   assertEquals(items, [])
 })
 
@@ -128,6 +131,11 @@ Deno.test('averageKmPerDay: menos de 7 días con registro → null; promedio 0 �
   assertEquals(averageKmPerDay(withToday, TODAY), 7) // 7 × 28 / 28; el día de hoy no cuenta
 })
 
+Deno.test('averageKmPerDay: 6 días con registro más el de hoy → null (hoy no cuenta)', () => {
+  const rows = [...Array.from({ length: 6 }, (_, i) => ({ date: `2026-09-${String(19 + i).padStart(2, '0')}`, km: 50 })), { date: TODAY, km: 9999 }]
+  assertEquals(averageKmPerDay(rows, TODAY), null)
+})
+
 Deno.test('estimatedDays en mantenimiento por km (redondeo hacia arriba), no en vencidos', () => {
   const avg = new Map([['a', 100], ['b', 100]])
   const items = computeReminders(
@@ -137,4 +145,12 @@ Deno.test('estimatedDays en mantenimiento por km (redondeo hacia arriba), no en 
   assertEquals(byId.a.estimatedDays, 8)       // 750 / 100 → 7,5 → 8
   assertEquals(byId.b.estimatedDays, undefined) // vencido
   assertEquals(byId.c.estimatedDays, undefined) // sin promedio
+})
+
+Deno.test('estimatedDays: sin asignar si supera MAX_ESTIMATE_DAYS (365)', () => {
+  const avg = new Map([['a', 1]])
+  const items = computeReminders(
+    [v({ id: 'a', next_maintenance_km: 11500 })],
+    [odo('a', 10000)], S, TODAY, avg)
+  assertEquals(items[0].estimatedDays, undefined) // 1.500 km / 1 km/día = 1.500 días > 365
 })
