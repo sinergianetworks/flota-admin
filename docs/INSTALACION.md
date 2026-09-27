@@ -249,9 +249,10 @@ order by local_date desc, kind
 limit 20;
 ```
 
+La columna `kind` indica el correo: `daily` = alerta diaria, `weekly` = reporte semanal.
+
 | status | Significado |
 |---|---|
-| `kind` | `daily` es la alerta diaria y `weekly` el reporte semanal. |
 | `sent` | Correo enviado. |
 | `nothing_to_send` | No había vencimientos ese día; no se envió correo. |
 | `disabled` | Registros anteriores; ya no se registra (si el correo está desactivado, no se reserva el día). |
@@ -285,7 +286,7 @@ limit 20;
 | `sync-mileage` responde **401** desde el cron | `flota_sync_secret` en Vault no es igual a `SYNC_CRON_SECRET`, o tiene menos de 16 caracteres. |
 | El proveedor aparece **"(sin configurar)"** | Falta alguno de los secrets `TRACKSOLID_*`. |
 | El enlace de recuperación de contraseña lleva a otro sitio | *Site URL* y *Redirect URLs* (paso 6). |
-| Los recordatorios no llegan y `reminder_log` no tiene filas | Sin `RESEND_API_KEY` el job no hace nada (no es un error): completa el paso 9. |
+| Los recordatorios no llegan y `reminder_log` no tiene filas | Sin `RESEND_API_KEY` el job no hace nada (no es un error): completa el paso 9. También revisa que los recordatorios o el reporte semanal no estén desactivados en Configuración, y para el semanal, que hoy sea el día configurado. |
 | **"Faltan secrets para enviar correos"** al pulsar *Enviar correo de prueba* | Falta `RESEND_API_KEY`, `EMAIL_FROM` o `APP_URL` (paso 9). |
 | **"Resend (403)"** al enviar la prueba | El dominio de `EMAIL_FROM` no está verificado en Resend. |
 | `reminder_log` en `error` con `APP_URL debe empezar con http:// o https://` | Corrige el secret `APP_URL`. |

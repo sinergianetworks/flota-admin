@@ -89,6 +89,12 @@ export default function SettingsPage() {
     setForm(f => ({ ...f, ...patch }))
   }
 
+  function updateNumber(key: NumberKey, value: string) {
+    setMessage(null)
+    setTestResult(null)
+    setForm(f => ({ ...f, numbers: { ...f.numbers, [key]: value } }))
+  }
+
   const dirty = loaded != null && normalize(form) !== normalize(toForm(loaded))
 
   async function handleSave() {
@@ -187,7 +193,7 @@ export default function SettingsPage() {
             className="w-32"
             value={form.numbers[key]}
             aria-describedby={helpId}
-            onChange={e => update({ numbers: { ...form.numbers, [key]: e.target.value } })}
+            onChange={e => updateNumber(key, e.target.value)}
           />
           <span className="text-sm text-muted-foreground">{suffix}</span>
         </div>
