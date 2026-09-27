@@ -28,7 +28,7 @@ Deno.test('correo con avisos: asunto, secciones, botón y texto plano', () => {
     { ...base, kind: 'maintenance_km', remaining: 800, overdue: false, dueKm: 60000 },
   ]
   const e = buildReminderEmail(items, OPTS)
-  assertEquals(e.subject, 'Transportes Ejemplo: 2 vencimientos — 26/09/2026')
+  assertEquals(e.subject, 'Transportes Ejemplo: 2 alertas de mantenimiento — 26/09/2026')
   assertStringIncludes(e.html, 'Vencidos')
   assertStringIncludes(e.html, 'Próximos')
   assertStringIncludes(e.html, 'Seguro')
@@ -40,11 +40,11 @@ Deno.test('correo con avisos: asunto, secciones, botón y texto plano', () => {
 
 Deno.test('singular y sin avisos', () => {
   const one = buildReminderEmail([{ ...base, kind: 'insurance', remaining: 5, overdue: false, dueDate: '2026-10-01' }], OPTS)
-  assertEquals(one.subject, 'Transportes Ejemplo: 1 vencimiento — 26/09/2026')
+  assertEquals(one.subject, 'Transportes Ejemplo: 1 alerta de mantenimiento — 26/09/2026')
   assert(!one.html.includes('Vencidos'))
   const none = buildReminderEmail([], OPTS)
-  assertEquals(none.subject, 'Transportes Ejemplo: sin vencimientos — 26/09/2026')
-  assertStringIncludes(none.text, 'No hay vencimientos')
+  assertEquals(none.subject, 'Transportes Ejemplo: sin alertas de mantenimiento — 26/09/2026')
+  assertStringIncludes(none.text, 'No hay mantenimientos por vencer')
 })
 
 Deno.test('escapa HTML de los datos', () => {
@@ -72,4 +72,16 @@ Deno.test('html: escapa placa y appName con etiquetas', () => {
   assert(!e.html.includes('<b>Transportes</b>'))
   assertStringIncludes(e.html, '&lt;b&gt;AB-12&lt;/b&gt;')
   assertStringIncludes(e.html, '&lt;b&gt;Transportes&lt;/b&gt;')
+})
+
+Deno.test('describeItem: estimación de días en mantenimiento por km', () => {
+  assertEquals(describeItem({ ...base, kind: 'maintenance_km', remaining: 700, overdue: false, dueKm: 126500, estimatedDays: 7 }),
+    'faltan 700 km (≈ 7 días al ritmo actual; a los 126.500 km)')
+  assertEquals(describeItem({ ...base, kind: 'maintenance_km', remaining: 50, overdue: false, dueKm: 126500, estimatedDays: 1 }),
+    'faltan 50 km (≈ 1 día al ritmo actual; a los 126.500 km)')
+})
+
+Deno.test('pie del correo diario', () => {
+  const e = buildReminderEmail([{ ...base, kind: 'maintenance_date', remaining: 3, overdue: false, dueDate: '2026-09-29' }], OPTS)
+  assertStringIncludes(e.text, 'Recibes este aviso porque estás en la lista de avisos de la flota.')
 })
