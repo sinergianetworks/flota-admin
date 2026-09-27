@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  Truck, MapPin, BookOpen, Pencil, Gauge, AlertCircle, Wrench, BarChart2, ExternalLink, X, Shield, FileText,
+  Truck, MapPin, BookOpen, Pencil, Gauge, AlertCircle, Wrench, BarChart2, ExternalLink, X, Shield, FileText, Archive, RotateCcw,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { DOCS_BUCKET, PHOTOS_BUCKET, openSignedFile, useSignedUrl } from '@/lib/storage'
@@ -22,6 +22,9 @@ interface Props {
   onEdit?: () => void
   onChanged: () => void
   canManage: boolean
+  // Vista de archivados: sin GPS en vivo ni recorrido; permite restaurar.
+  archived?: boolean
+  onRestore?: () => Promise<void>
 }
 
 function MovementBadge({ vehicle, status }: { vehicle: Vehicle; status: LiveStatus | undefined }) {
@@ -190,7 +193,8 @@ async function reverseGeocode(lat: number, lng: number): Promise<string> {
   } catch { return '' }
 }
 
-export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onChanged, canManage }: Props) {
+export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onChanged, canManage, archived = false, onRestore }: Props) {
+  const [restoring, setRestoring] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [showChart, setShowChart] = useState(false)
   const [showMap, setShowMap] = useState(false)
@@ -233,7 +237,7 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
 
   return (
     <>
-      <Card className="overflow-hidden transition-shadow duration-200 hover:shadow-md">
+      <Card className={`overflow-hidden transition-shadow duration-200 hover:shadow-md ${archived ? 'opacity-75' : ''}`}>
         <div className="relative w-full bg-white overflow-hidden aspect-[3/2]">
           {photoUrl ? (
             <img src={photoUrl} alt={vehicle.name} className="w-full h-full object-contain p-3" />
@@ -243,7 +247,14 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
             </div>
           )}
           <div className="absolute top-2.5 right-2.5">
-            <MovementBadge vehicle={vehicle} status={status} />
+            {archived ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-semibold border shadow-sm bg-white/90 text-gray-600 border-gray-300">
+                <Archive size={12} />
+                Archivado
+              </span>
+            ) : (
+              <MovementBadge vehicle={vehicle} status={status} />
+            )}
           </div>
         </div>
 
@@ -335,6 +346,22 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
           )}
 
           <div className="flex items-center gap-2 px-3 py-2.5 border-t border-gray-100">
+            {archived && onRestore && (
+              <button
+                className="flex flex-1 items-center justify-center gap-1.5 h-[42px] rounded-[11px] text-[13.5px] font-[620] border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors disabled:opacity-50"
+                onClick={async () => {
+                  setRestoring(true)
+                  try { await onRestore() } finally { setRestoring(false) }
+                }}
+                disabled={restoring}
+                title="Restaurar vehículo"
+              >
+                <RotateCcw size={14} />
+                {restoring ? 'Restaurando...' : 'Restaurar'}
+              </button>
+            )}
+            {!archived && (
+            <>
             <button
               className={`flex flex-1 items-center justify-center gap-1.5 h-[42px] rounded-[11px] text-[13.5px] font-[620] border transition-colors
                 ${!hasPosition ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-white' : 'border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-300'}`}
@@ -357,6 +384,8 @@ export default function VehicleCard({ vehicle, status, refreshKey, onEdit, onCha
                 <BarChart2 size={14} />
                 Recorrido
               </button>
+            )}
+            </>
             )}
             <button
               className="flex items-center justify-center w-[42px] h-[42px] rounded-[11px] border border-gray-200 text-gray-500 bg-white hover:bg-gray-50 hover:border-gray-300 transition-colors"
