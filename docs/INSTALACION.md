@@ -240,6 +240,10 @@ Flota Admin envía dos correos a la **lista de destinatarios** de Configuración
 
 3. En la app, entra a **Configuración**, carga los destinatarios, elige el día del reporte y usa **Probar alerta diaria** y **Probar reporte semanal**.
 
+   | Destinatarios y alertas diarias | Reporte semanal y seguro |
+   |---|---|
+   | ![Configuración: destinatarios y alertas diarias](capturas/configuracion-alertas.png) | ![Configuración: reporte semanal y seguro](capturas/configuracion-reporte.png) |
+
 Los jobs `flota-recordatorios` y `flota-reporte-semanal` usan los mismos secretos de Vault que el cron de kilometraje (paso 8), así que no hace falta nada más. Para revisar los envíos:
 
 ```sql

@@ -12,5 +12,7 @@ Capturas del README principal.
 | `conductor-movil.png` | Vista del conductor en el teléfono (390 px @2x) |
 | `mapa.png` | Mapa de flota con posiciones GPS y lista de vehículos |
 | `mapa-vehiculo.png` | Ubicación de un vehículo con su dirección aproximada |
+| `configuracion-alertas.png` | Configuración: destinatarios y alertas diarias de mantenimiento |
+| `configuracion-reporte.png` | Configuración: reporte semanal y umbral del seguro |
 
 Al agregar o reemplazar una captura, evita datos reales: ni nombres de personas o clientes, ni placas, IMEIs, ubicaciones reconocibles ni logos de terceros.

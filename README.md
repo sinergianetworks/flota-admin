@@ -33,6 +33,12 @@ Plataforma web para administrar una flota de vehículos: kilometraje, mantenimie
 |---|---|---|
 | ![Ubicación](docs/capturas/mapa-vehiculo.png) | ![Bitácora](docs/capturas/bitacora.png) | <img src="docs/capturas/conductor-movil.png" alt="Vista del conductor" width="300"> |
 
+**Configuración de los correos:** destinatarios, alertas diarias de mantenimiento, reporte semanal y umbral del seguro.
+
+| Destinatarios y alertas diarias | Reporte semanal y seguro |
+|---|---|
+| ![Configuración: destinatarios y alertas diarias](docs/capturas/configuracion-alertas.png) | ![Configuración: reporte semanal y seguro](docs/capturas/configuracion-reporte.png) |
+
 ## Arquitectura
 
 ```
