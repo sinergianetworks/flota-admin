@@ -22,12 +22,16 @@ const state = {
   },
   vehicles: [
     { id: 'v1', name: 'Pickup', plate: 'AB-1', active: true, next_maintenance_km: 60000, next_maintenance_date: null, insurance_company: 'Aseg', insurance_expiry: '2026-09-20', gps_device_id: '111', driver: { full_name: 'Ana' } },
+    { id: 'v2', name: 'Sedan', plate: 'CD-2', active: true, next_maintenance_km: null, next_maintenance_date: null, insurance_company: null, insurance_expiry: null, gps_device_id: null, driver: null },
   ] as Record<string, unknown>[],
   odometers: [{ vehicle_id: 'v1', odometer_km: 51000, has_data: true }],
   mileage: [{ vehicle_id: 'v1', date: '2026-09-22', km: 120 }],
   admins: [{ email: 'a1@ejemplo.test' }],
   log: new Map<string, Record<string, unknown>>(),
   emails: [] as Record<string, unknown>[],
+  // Último valor de vehicle_id que recibió el mock de vehicle_daily_mileage
+  // (para verificar que solo se consultan los vehículos con GPS).
+  mileageVehicleIdParam: null as string | null,
 }
 
 function resetState() {
@@ -36,6 +40,7 @@ function resetState() {
   state.settings.weekly_report_enabled = true
   state.settings.weekly_report_day = 1
   state.settings.notification_emails = []
+  state.mileageVehicleIdParam = null
 }
 
 const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
@@ -54,15 +59,19 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
   }
   switch (url.pathname) {
     case '/rest/v1/fleet_settings': return one(state.settings)
-    case '/rest/v1/vehicles':
+    case '/rest/v1/vehicles': {
       if (url.searchParams.get('active') !== 'eq.true') return new Response('falta active', { status: 400 })
+      const select = url.searchParams.get('select') ?? ''
+      if (!select.includes('driver:profiles(full_name)')) return new Response('falta el embed de driver', { status: 400 })
       return Response.json(state.vehicles)
+    }
     case '/rest/v1/vehicle_odometer': return Response.json(state.odometers)
     case '/rest/v1/vehicle_daily_mileage': {
-      const gte = url.searchParams.get('date.gte') ?? url.searchParams.getAll('date').find(v => v.startsWith('gte.'))
-      const lt = url.searchParams.get('date.lt') ?? url.searchParams.getAll('date').find(v => v.startsWith('lt.'))
+      const gte = url.searchParams.getAll('date').find(v => v.startsWith('gte.'))
+      const lt = url.searchParams.getAll('date').find(v => v.startsWith('lt.'))
       const vehicleId = url.searchParams.get('vehicle_id')
       if (!gte || !lt || !vehicleId || !vehicleId.startsWith('in.(')) return new Response('faltan filtros', { status: 400 })
+      state.mileageVehicleIdParam = vehicleId
       return Response.json(state.mileage)
     }
     case '/rest/v1/profiles':
@@ -111,6 +120,32 @@ Deno.test({ name: 'flujo de send-weekly-report', sanitizeOps: false, sanitizeRes
       assertEquals(state.log.size, 0)
     })
 
+    await t.step('sin Resend configurado: not_configured y no reserva', async () => {
+      resetState()
+      const previous = Deno.env.get('RESEND_API_KEY')
+      Deno.env.delete('RESEND_API_KEY')
+      try {
+        assertEquals((await (await at(LUNES_0715)(cron())).json()).skipped, 'not_configured')
+        assertEquals(state.log.size, 0)
+      } finally {
+        if (previous != null) Deno.env.set('RESEND_API_KEY', previous)
+      }
+    })
+
+    await t.step('secreto de cron equivocado sin sesión: 401', async () => {
+      resetState()
+      const req = new Request('http://f', { method: 'POST', headers: { 'x-cron-secret': 'secreto-incorrecto' }, body: '{}' })
+      const res = await at(LUNES_0715)(req)
+      assertEquals(res.status, 401)
+    })
+
+    await t.step('zona horaria: domingo 22:00 en La Paz sigue siendo not_today', async () => {
+      resetState()
+      // 2026-09-28T02:00:00Z es domingo 22:00 en America/La_Paz (UTC-4).
+      assertEquals((await (await at('2026-09-28T02:00:00Z')(cron())).json()).skipped, 'not_today')
+      assertEquals(state.log.size, 0)
+    })
+
     await t.step('el día configurado envía el reporte a los admins y lo registra', async () => {
       resetState()
       const res = await (await at(LUNES_0715)(cron())).json()
@@ -120,6 +155,10 @@ Deno.test({ name: 'flujo de send-weekly-report', sanitizeOps: false, sanitizeRes
       assertStringIncludes(String(state.emails[0].subject), 'reporte semanal — 21/09 al 27/09/2026')
       assertStringIncludes(String(state.emails[0].text), 'semana 120 km')
       assertEquals(state.log.get('weekly:2026-09-28')?.status, 'sent')
+      // Filtro GPS: solo v1 tiene gps_device_id, así que solo él se consulta
+      // en vehicle_daily_mileage; v2 aparece en el correo como "sin GPS".
+      assertEquals(state.mileageVehicleIdParam, 'in.(v1)')
+      assertStringIncludes(String(state.emails[0].text), 'sin GPS')
     })
 
     await t.step('no repite el mismo día', async () => {
