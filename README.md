@@ -39,6 +39,12 @@ Plataforma web para administrar una flota de vehículos: kilometraje, mantenimie
 |---|---|
 | ![Configuración: destinatarios y alertas diarias](docs/capturas/configuracion-alertas.png) | ![Configuración: reporte semanal y seguro](docs/capturas/configuracion-reporte.png) |
 
+**Los correos:** la alerta diaria avisa de los mantenimientos próximos (con los días estimados según el uso) y el reporte semanal resume toda la flota.
+
+| Alerta diaria de mantenimiento | Reporte semanal |
+|---|---|
+| ![Correo: alerta diaria de mantenimiento](docs/capturas/correo-alerta-diaria.png) | ![Correo: reporte semanal](docs/capturas/correo-reporte-semanal.png) |
+
 ## Arquitectura
 
 ```

@@ -14,5 +14,7 @@ Capturas del README principal.
 | `mapa-vehiculo.png` | Ubicación de un vehículo con su dirección aproximada |
 | `configuracion-alertas.png` | Configuración: destinatarios y alertas diarias de mantenimiento |
 | `configuracion-reporte.png` | Configuración: reporte semanal y umbral del seguro |
+| `correo-alerta-diaria.png` | Correo de alerta diaria de mantenimiento (datos ficticios) |
+| `correo-reporte-semanal.png` | Correo del reporte semanal, parte superior (datos ficticios) |
 
 Al agregar o reemplazar una captura, evita datos reales: ni nombres de personas o clientes, ni placas, IMEIs, ubicaciones reconocibles ni logos de terceros.

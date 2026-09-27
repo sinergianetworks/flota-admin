@@ -244,6 +244,12 @@ Flota Admin envía dos correos a la **lista de destinatarios** de Configuración
    |---|---|
    | ![Configuración: destinatarios y alertas diarias](capturas/configuracion-alertas.png) | ![Configuración: reporte semanal y seguro](capturas/configuracion-reporte.png) |
 
+   Así se ven los dos correos:
+
+   | Alerta diaria de mantenimiento | Reporte semanal |
+   |---|---|
+   | ![Correo: alerta diaria de mantenimiento](capturas/correo-alerta-diaria.png) | ![Correo: reporte semanal](capturas/correo-reporte-semanal.png) |
+
 Los jobs `flota-recordatorios` y `flota-reporte-semanal` usan los mismos secretos de Vault que el cron de kilometraje (paso 8), así que no hace falta nada más. Para revisar los envíos:
 
 ```sql
