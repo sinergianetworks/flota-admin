@@ -12,6 +12,7 @@ import { addDays, appTimeZone, dateInTz, hourInTz, isoWeekday } from '../_shared
 import { buildWeeklyReport, type WeeklyVehicle } from '../_shared/weekly_report.ts'
 import { buildWeeklyEmail } from '../_shared/weekly_email.ts'
 import { deliver, loadNotificationSettings, resendConfigured, SEND_HOUR } from '../_shared/notify.ts'
+import { fetchMileage } from '../_shared/mileage.ts'
 
 interface Deps {
   now: () => Date
@@ -63,17 +64,13 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
         // (ver reminders.ts); si ninguno tiene, no vale la pena consultarlo.
         const vehicles = (vRes.data ?? []) as unknown as WeeklyVehicle[]
         const gpsIds = vehicles.filter(v => v.gps_device_id).map(v => v.id)
-        const [oRes, mRes] = await Promise.all([
+        const [oRes, mileage] = await Promise.all([
           db.from('vehicle_odometer').select('vehicle_id, odometer_km, has_data'),
-          gpsIds.length > 0
-            ? db.from('vehicle_daily_mileage').select('vehicle_id, date, km')
-                .gte('date', addDays(today, -28)).lt('date', today).in('vehicle_id', gpsIds)
-            : Promise.resolve({ data: [] as { vehicle_id: string; date: string; km: number }[], error: null }),
+          fetchMileage(db, gpsIds, addDays(today, -28), today),
         ])
-        const err = oRes.error ?? mRes.error
-        if (err) throw new HttpError(500, err.message)
+        if (oRes.error) throw new HttpError(500, oRes.error.message)
 
-        const report = buildWeeklyReport({ vehicles, odometers: oRes.data ?? [], mileage: mRes.data ?? [] }, settings, today)
+        const report = buildWeeklyReport({ vehicles, odometers: oRes.data ?? [], mileage }, settings, today)
         return {
           itemCount: report.rows.length,
           nothingToSend: report.rows.length === 0,

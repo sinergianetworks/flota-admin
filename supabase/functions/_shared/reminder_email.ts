@@ -1,19 +1,12 @@
 // Correo diario de alertas de mantenimiento: asunto, HTML y texto plano.
 import type { ReminderItem } from './reminders.ts'
+import type { EmailContent } from './email_format.ts'
 import { alertsSection, alertsText, appLink, date, emailShell, RED, AMBER } from './email_format.ts'
-
-export { describeItem } from './email_format.ts'
 
 export interface EmailOptions {
   appName: string
   appUrl: string
   today: string // YYYY-MM-DD
-}
-
-export interface EmailContent {
-  subject: string
-  html: string
-  text: string
 }
 
 const FOOTER = 'Recibes este aviso porque estás en la lista de avisos de la flota. Se repite cada día hasta que se actualice el mantenimiento en la app.'

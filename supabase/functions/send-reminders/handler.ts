@@ -12,6 +12,7 @@ import { addDays, appTimeZone, dateInTz, hourInTz } from '../_shared/time.ts'
 import { averageKmPerDay, computeReminders } from '../_shared/reminders.ts'
 import { buildReminderEmail } from '../_shared/reminder_email.ts'
 import { deliver, loadNotificationSettings, resendConfigured, SEND_HOUR } from '../_shared/notify.ts'
+import { fetchMileage } from '../_shared/mileage.ts'
 
 interface Deps {
   now: () => Date
@@ -61,18 +62,14 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
         // El kilometraje solo sirve para estimar días en vehículos con GPS
         // (ver reminders.ts); si ninguno tiene, no vale la pena consultarlo.
         const gpsIds = (vRes.data ?? []).filter(v => v.gps_device_id).map(v => v.id)
-        const [oRes, mRes] = await Promise.all([
+        const [oRes, mileage] = await Promise.all([
           db.from('vehicle_odometer').select('vehicle_id, odometer_km, has_data'),
-          gpsIds.length > 0
-            ? db.from('vehicle_daily_mileage').select('vehicle_id, date, km')
-                .gte('date', addDays(today, -28)).lt('date', today).in('vehicle_id', gpsIds)
-            : Promise.resolve({ data: [] as { vehicle_id: string; date: string; km: number }[], error: null }),
+          fetchMileage(db, gpsIds, addDays(today, -28), today),
         ])
-        const err = oRes.error ?? mRes.error
-        if (err) throw new HttpError(500, err.message)
+        if (oRes.error) throw new HttpError(500, oRes.error.message)
 
         const byVehicle = new Map<string, { date: string; km: number }[]>()
-        for (const m of mRes.data ?? []) {
+        for (const m of mileage) {
           const list = byVehicle.get(m.vehicle_id) ?? []
           list.push({ date: m.date, km: Number(m.km) })
           byVehicle.set(m.vehicle_id, list)

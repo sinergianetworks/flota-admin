@@ -1,6 +1,12 @@
 // Helpers de formato compartidos por los correos (diario y semanal).
 import type { ReminderItem, ReminderKind } from './reminders.ts'
 
+export interface EmailContent {
+  subject: string
+  html: string
+  text: string
+}
+
 export const KIND_LABEL: Record<ReminderKind, string> = {
   insurance: 'Seguro',
   maintenance_date: 'Mantenimiento (fecha)',

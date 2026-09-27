@@ -24,6 +24,9 @@ as $$
 $$;
 
 revoke execute on function public.flota_valid_emails(text[]) from public, anon;
+-- La usa un CHECK, así que quien actualiza (authenticated) necesita EXECUTE;
+-- no dependemos de los privilegios por defecto.
+grant execute on function public.flota_valid_emails(text[]) to authenticated, service_role;
 
 alter table public.fleet_settings
   add column notification_emails text[] not null default '{}'
@@ -35,10 +38,9 @@ alter table public.fleet_settings
 comment on column public.fleet_settings.notification_emails is 'Destinatarios de los correos. Vacía = administradores activos.';
 comment on column public.fleet_settings.weekly_report_day is 'Día del reporte semanal: 1 = lunes … 7 = domingo.';
 
--- authenticated ya tiene UPDATE por los privilegios por defecto (0600) y la
--- RLS limita quién edita en la práctica al admin; id lo protegen el
--- check (id) y la PK. Este grant es redundante pero explícito, para dejar
--- claro por columnas qué se puede editar sin depender solo de la RLS.
+-- Grant explícito por columnas: sin esto authenticated no podría actualizar
+-- estas columnas (los privilegios por defecto no bastan). La RLS limita
+-- quién edita en la práctica al admin; id lo protegen el check (id) y la PK.
 grant update (notification_emails, weekly_report_enabled, weekly_report_day) on public.fleet_settings to authenticated;
 
 -- ── Tipo de envío en el registro ─────────────────────────────

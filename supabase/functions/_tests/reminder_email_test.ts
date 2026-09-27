@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from 'jsr:@std/assert@1'
-import { buildReminderEmail, describeItem } from '../_shared/reminder_email.ts'
+import { buildReminderEmail } from '../_shared/reminder_email.ts'
+import { describeItem } from '../_shared/email_format.ts'
 import type { ReminderItem } from '../_shared/reminders.ts'
 
 const OPTS = { appName: 'Transportes Ejemplo', appUrl: 'https://flota.ejemplo.test/', today: '2026-09-26' }

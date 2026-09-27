@@ -1,7 +1,7 @@
 // Correo del reporte semanal: resumen, alertas y tabla de todos los vehículos.
-import type { EmailContent } from './reminder_email.ts'
 import type { WeeklyReport, WeeklyVehicleRow } from './weekly_report.ts'
 import type { ReminderKind } from './reminders.ts'
+import type { EmailContent } from './email_format.ts'
 import { alertsSection, alertsText, appLink, date, days, emailShell, esc, int, shortDate, AMBER, RED } from './email_format.ts'
 
 const WEEKDAYS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']

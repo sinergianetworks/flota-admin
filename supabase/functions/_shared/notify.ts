@@ -4,7 +4,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { json, HttpError } from './http.ts'
 import { emailConfig, sendEmail, ResendHttpError } from './resend.ts'
-import type { EmailContent } from './reminder_email.ts'
+import type { EmailContent } from './email_format.ts'
 
 export const SEND_HOUR = 7
 

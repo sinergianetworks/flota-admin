@@ -1,6 +1,6 @@
-// Cálculo puro de los avisos de vencimiento (mantenimiento y seguro). Sin
-// estado: se recalcula cada día, así que un aviso deja de aparecer en cuanto
-// el admin actualiza el dato en la app.
+// Cálculos de mantenimiento y seguro compartidos por el correo diario y el
+// reporte semanal. Sin estado: se recalcula cada día, así que un aviso deja
+// de aparecer en cuanto el admin actualiza el dato en la app.
 import { addDays, daysBetween } from './time.ts'
 
 export interface ReminderSettings {
