@@ -18,12 +18,17 @@ const { withErrors } = await import('../_shared/http.ts')
 
 // ── Estado simulado ──────────────────────────────────────────
 const state = {
-  settings: { maintenance_km_threshold: 2000, maintenance_days_threshold: 15, insurance_days_threshold: 30, email_reminders_enabled: true },
+  settings: {
+    maintenance_km_threshold: 2000, maintenance_days_threshold: 15, insurance_days_threshold: 30,
+    email_reminders_enabled: true,
+    notification_emails: [] as string[], weekly_report_enabled: true, weekly_report_day: 1,
+  },
   vehicles: [
     { id: 'v1', name: 'Pickup', plate: 'AB-1', active: true, next_maintenance_km: 10500, next_maintenance_date: null, insurance_expiry: '2026-09-20' },
     { id: 'v2', name: 'Sedán', plate: null, active: true, next_maintenance_km: null, next_maintenance_date: null, insurance_expiry: null },
   ],
   odometers: [{ vehicle_id: 'v1', odometer_km: 10000, has_data: true }],
+  mileage: [] as { vehicle_id: string; date: string; km: number }[],
   admins: [{ email: 'a1@ejemplo.test' }, { email: 'a2@ejemplo.test' }],
   log: new Map<string, Record<string, unknown>>(),
   emails: [] as Record<string, unknown>[],
@@ -39,6 +44,8 @@ function resetState() {
   state.resendFails = false
   state.failEndpoint = null
   state.settings.email_reminders_enabled = true
+  state.settings.notification_emails = []
+  state.mileage = []
 }
 
 const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
@@ -72,6 +79,7 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
       return Response.json(state.vehicles)
     }
     case '/rest/v1/vehicle_odometer': return Response.json(state.odometers)
+    case '/rest/v1/vehicle_daily_mileage': return Response.json(state.mileage)
     case '/rest/v1/profiles': {
       const id = url.searchParams.get('id')
       if (id === 'eq.u-admin') return one({ role: 'admin', active: true })
@@ -82,20 +90,21 @@ const server = Deno.serve({ port: PORT, onListen() {} }, async (req) => {
       }
       return Response.json(state.admins)
     }
-    case '/rest/v1/rpc/flota_claim_reminder_day': {
+    case '/rest/v1/rpc/flota_claim_notification': {
       // Misma semántica que la función SQL: reclama si no existe o está en error.
-      const { p_date } = await req.json()
-      const row = state.log.get(p_date)
+      const { p_kind, p_date } = await req.json()
+      const key = `${p_kind}:${p_date}`
+      const row = state.log.get(key)
       if (row && row.status !== 'error') return Response.json(false)
-      state.log.set(p_date, { local_date: p_date, status: 'sending' })
+      state.log.set(key, { kind: p_kind, local_date: p_date, status: 'sending' })
       return Response.json(true)
     }
     case '/rest/v1/reminder_log': {
-      if (req.method !== 'POST' || url.searchParams.get('on_conflict') !== 'local_date' || !(req.headers.get('prefer') ?? '').includes('merge-duplicates')) {
+      if (req.method !== 'POST' || url.searchParams.get('on_conflict') !== 'kind,local_date' || !(req.headers.get('prefer') ?? '').includes('merge-duplicates')) {
         return new Response('upsert mal formado', { status: 400 })
       }
       const body = await req.json()
-      for (const row of Array.isArray(body) ? body : [body]) state.log.set(row.local_date, row)
+      for (const row of Array.isArray(body) ? body : [body]) state.log.set(`${row.kind}:${row.local_date}`, row)
       return new Response(null, { status: 201 })
     }
   }
@@ -141,11 +150,11 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       resetState()
       const res = await (await at(SIETE)(cron())).json()
       assertEquals(res.status, 'sent')
-      assertEquals(res.items, 2)
+      assertEquals(res.items, 1)
       assertEquals(state.emails.length, 1)
       assertEquals(state.emails[0].to, ['a1@ejemplo.test', 'a2@ejemplo.test'])
-      assertStringIncludes(String(state.emails[0].subject), '2 vencimientos — 26/09/2026')
-      assertEquals(state.log.get('2026-09-26')?.status, 'sent')
+      assertStringIncludes(String(state.emails[0].subject), '1 alerta de mantenimiento — 26/09/2026')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sent')
     })
 
     await t.step('la siguiente hora no repite el envío', async () => {
@@ -154,13 +163,13 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.emails.length, 1)
     })
 
-    await t.step('desactivado: registra y no envía', async () => {
+    await t.step('desactivado: no reserva ni registra', async () => {
       resetState()
       state.settings.email_reminders_enabled = false
       const res = await (await at(SIETE)(cron())).json()
-      assertEquals(res.status, 'disabled')
+      assertEquals(res.skipped, 'disabled')
       assertEquals(state.emails.length, 0)
-      assertEquals(state.log.get('2026-09-26')?.status, 'disabled')
+      assertEquals(state.log.size, 0)
     })
 
     await t.step('sin avisos: registra y no envía', async () => {
@@ -171,7 +180,7 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       state.vehicles = saved
       assertEquals(res.status, 'nothing_to_send')
       assertEquals(state.emails.length, 0)
-      assertEquals(state.log.get('2026-09-26')?.status, 'nothing_to_send')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'nothing_to_send')
     })
 
     await t.step('error de Resend: registra error y reintenta la hora siguiente', async () => {
@@ -179,12 +188,12 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       state.resendFails = true
       const res = await at(SIETE)(cron())
       assertEquals(res.status, 502)
-      assertEquals(state.log.get('2026-09-26')?.status, 'error')
-      assertStringIncludes(String(state.log.get('2026-09-26')?.error), 'Resend (403)')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'error')
+      assertStringIncludes(String(state.log.get('daily:2026-09-26')?.error), 'Resend (403)')
       state.resendFails = false
       const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
       assertEquals(retry.status, 'sent')
-      assertEquals(state.log.get('2026-09-26')?.status, 'sent')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sent')
     })
 
     await t.step('corte de red al enviar: queda en sending y no se reintenta', async () => {
@@ -194,7 +203,7 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       const res = await at(SIETE)(cron())
       Deno.env.set('RESEND_API_URL', `${BASE}/resend/emails`)
       assertEquals(res.status, 502)
-      assertEquals(state.log.get('2026-09-26')?.status, 'sending')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sending')
       const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
       assertEquals(retry.skipped, 'already_sent')
       assertEquals(state.emails.length, 0)
@@ -214,20 +223,22 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.log.size, 0)
     })
 
-    await t.step('error leyendo la configuración: registra error y reintenta la hora siguiente', async () => {
+    // La lectura de fleet_settings ocurre antes de reservar el día (ver
+    // notify.ts): si falla, no queda ninguna reserva colgada y la hora
+    // siguiente arranca de cero, sin necesitar un estado 'error' previo.
+    await t.step('error leyendo la configuración: no reserva y reintenta la hora siguiente', async () => {
       resetState()
       state.failEndpoint = '/rest/v1/fleet_settings'
       try {
         const res = await at(SIETE)(cron())
         assertEquals(res.status, 500)
-        assertEquals(state.log.get('2026-09-26')?.status, 'error')
-        assertStringIncludes(String(state.log.get('2026-09-26')?.error), 'configuración')
+        assertEquals(state.log.size, 0)
       } finally {
         state.failEndpoint = null
       }
       const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
       assertEquals(retry.status, 'sent')
-      assertEquals(state.log.get('2026-09-26')?.status, 'sent')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sent')
     })
 
     await t.step('error leyendo vehículos: registra error y reintenta la hora siguiente', async () => {
@@ -236,13 +247,13 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       try {
         const res = await at(SIETE)(cron())
         assertEquals(res.status, 500)
-        assertEquals(state.log.get('2026-09-26')?.status, 'error')
+        assertEquals(state.log.get('daily:2026-09-26')?.status, 'error')
       } finally {
         state.failEndpoint = null
       }
       const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
       assertEquals(retry.status, 'sent')
-      assertEquals(state.log.get('2026-09-26')?.status, 'sent')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sent')
     })
 
     await t.step('error leyendo administradores: registra error y reintenta la hora siguiente', async () => {
@@ -251,14 +262,14 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       try {
         const res = await at(SIETE)(cron())
         assertEquals(res.status, 500)
-        assertEquals(state.log.get('2026-09-26')?.status, 'error')
-        assertStringIncludes(String(state.log.get('2026-09-26')?.error), 'administradores')
+        assertEquals(state.log.get('daily:2026-09-26')?.status, 'error')
+        assertStringIncludes(String(state.log.get('daily:2026-09-26')?.error), 'administradores')
       } finally {
         state.failEndpoint = null
       }
       const retry = await (await at('2026-09-26T12:10:00Z')(cron())).json()
       assertEquals(retry.status, 'sent')
-      assertEquals(state.log.get('2026-09-26')?.status, 'sent')
+      assertEquals(state.log.get('daily:2026-09-26')?.status, 'sent')
     })
 
     await t.step('no-admin con sesión recibe 403', async () => {
@@ -282,15 +293,39 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.log.size, 0)
     })
 
-    await t.step('prueba sin avisos: se envía con el asunto de "sin vencimientos"', async () => {
+    await t.step('prueba sin avisos: se envía con el asunto de "sin alertas"', async () => {
       resetState()
       const saved = state.vehicles
       state.vehicles = [saved[1]]
       const res = await (await at(SIETE)(admin('jwt-admin'))).json()
       state.vehicles = saved
       assertEquals(res.status, 'sent')
-      assertStringIncludes(String(state.emails[0].subject), 'sin vencimientos')
+      assertStringIncludes(String(state.emails[0].subject), 'sin alertas de mantenimiento')
       assertEquals(state.log.size, 0)
+    })
+
+    await t.step('destinatarios configurados reemplazan a los admins', async () => {
+      resetState()
+      state.settings.notification_emails = ['flota@ejemplo.test', 'jefe@ejemplo.test']
+      const res = await (await at(SIETE)(cron())).json()
+      assertEquals(res.status, 'sent')
+      assertEquals(state.emails[0].to, ['flota@ejemplo.test', 'jefe@ejemplo.test'])
+    })
+
+    await t.step('estimación de días con el kilometraje de los últimos 28 días', async () => {
+      resetState()
+      // 14 días × 100 km → promedio 50 km/día; faltan 500 km → ≈ 10 días
+      state.mileage = Array.from({ length: 14 }, (_, i) => ({ vehicle_id: 'v1', date: `2026-09-${String(12 + i).padStart(2, '0')}`, km: 100 }))
+      await (await at(SIETE)(cron())).json()
+      assertStringIncludes(String(state.emails[0].text), '≈ 10 días al ritmo actual')
+    })
+
+    await t.step('desactivado y reactivado el mismo día: la hora siguiente envía', async () => {
+      resetState()
+      state.settings.email_reminders_enabled = false
+      assertEquals((await (await at(SIETE)(cron())).json()).skipped, 'disabled')
+      state.settings.email_reminders_enabled = true
+      assertEquals((await (await at('2026-09-26T12:10:00Z')(cron())).json()).status, 'sent')
     })
   } finally {
     await server.shutdown()
