@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1'
-import { dayRangeUtc, resolveDate, startOfDayUtc, isValidDate, hourInTz, daysBetween } from '../_shared/time.ts'
+import { dayRangeUtc, resolveDate, startOfDayUtc, isValidDate, hourInTz, daysBetween, isoWeekday } from '../_shared/time.ts'
 
 Deno.test('día en UTC-4 fijo coincide con el rango que usaba la versión anterior', () => {
   // Antes: begin = "<fecha> 04:00:00", end = "<fecha+1> 03:59:59" (UTC)
@@ -59,4 +59,10 @@ Deno.test('daysBetween: días de calendario', () => {
   assertEquals(daysBetween('2026-09-26', '2026-09-26'), 0)
   assertEquals(daysBetween('2026-09-26', '2026-09-20'), -6)
   assertEquals(daysBetween('2026-02-28', '2026-03-01'), 1)
+})
+
+Deno.test('isoWeekday: 1 = lunes … 7 = domingo', () => {
+  assertEquals(isoWeekday('2026-09-28'), 1) // lunes
+  assertEquals(isoWeekday('2026-10-02'), 5) // viernes
+  assertEquals(isoWeekday('2026-09-27'), 7) // domingo
 })

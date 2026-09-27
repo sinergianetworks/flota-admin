@@ -1,7 +1,7 @@
-// Cálculo puro de los avisos de vencimiento del día. Sin estado: se
-// recalcula cada día, así que un aviso deja de aparecer en cuanto el admin
-// actualiza el dato en la app.
-import { daysBetween } from './time.ts'
+// Cálculo puro de los avisos de vencimiento (mantenimiento y seguro). Sin
+// estado: se recalcula cada día, así que un aviso deja de aparecer en cuanto
+// el admin actualiza el dato en la app.
+import { addDays, daysBetween } from './time.ts'
 
 export interface ReminderSettings {
   maintenance_km_threshold: number
@@ -17,6 +17,7 @@ export interface ReminderVehicle {
   next_maintenance_km: number | string | null
   next_maintenance_date: string | null
   insurance_expiry: string | null
+  gps_device_id?: string | null
 }
 
 export interface OdometerRow {
@@ -37,15 +38,35 @@ export interface ReminderItem {
   remaining: number
   dueDate?: string
   dueKm?: number
+  // días estimados hasta el mantenimiento por km (ritmo de los últimos 28 días)
+  estimatedDays?: number
 }
 
 const KIND_ORDER: ReminderKind[] = ['insurance', 'maintenance_date', 'maintenance_km']
 
+const AVG_WINDOW_DAYS = 28
+const MIN_DAYS_WITH_DATA = 7
+
+// Promedio de km por día de los últimos 28 días completos (hoy excluido).
+// Los días sin registro cuentan como 0 (el vehículo no se movió). Devuelve
+// null si hay menos de 7 días con registro o si el promedio no es positivo.
+export function averageKmPerDay(rows: { date: string; km: number | string }[], today: string): number | null {
+  const from = addDays(today, -AVG_WINDOW_DAYS)
+  const inRange = rows.filter(r => r.date >= from && r.date < today)
+  const days = new Set(inRange.map(r => r.date))
+  if (days.size < MIN_DAYS_WITH_DATA) return null
+  const avg = inRange.reduce((s, r) => s + Number(r.km), 0) / AVG_WINDOW_DAYS
+  return avg > 0 ? avg : null
+}
+
+// Avisos de mantenimiento (por km y por fecha) de los vehículos activos.
+// `avgKmPerDay` (opcional): promedio por vehículo para estimar los días.
 export function computeReminders(
   vehicles: ReminderVehicle[],
   odometers: OdometerRow[],
   settings: ReminderSettings,
   today: string,
+  avgKmPerDay: Map<string, number> = new Map(),
 ): ReminderItem[] {
   const odoById = new Map(odometers.map(o => [o.vehicle_id, o]))
   const items: ReminderItem[] = []
@@ -60,7 +81,11 @@ export function computeReminders(
       if (odo?.has_data && Number.isFinite(dueKm) && dueKm > 0) {
         const remaining = Math.round(dueKm - Number(odo.odometer_km))
         if (remaining <= settings.maintenance_km_threshold) {
-          items.push({ ...base, kind: 'maintenance_km', remaining, overdue: remaining <= 0, dueKm })
+          const overdue = remaining <= 0
+          const avg = avgKmPerDay.get(v.id)
+          const item: ReminderItem = { ...base, kind: 'maintenance_km', remaining, overdue, dueKm }
+          if (!overdue && avg && avg > 0) item.estimatedDays = Math.ceil(remaining / avg)
+          items.push(item)
         }
       }
     }
@@ -71,17 +96,28 @@ export function computeReminders(
         items.push({ ...base, kind: 'maintenance_date', remaining, overdue: remaining < 0, dueDate: v.next_maintenance_date })
       }
     }
-
-    if (v.insurance_expiry) {
-      const remaining = daysBetween(today, v.insurance_expiry)
-      if (remaining <= settings.insurance_days_threshold) {
-        items.push({ ...base, kind: 'insurance', remaining, overdue: remaining <= 0, dueDate: v.insurance_expiry })
-      }
-    }
   }
 
-  // Vencidos primero; dentro de cada grupo, por tipo y del más urgente al menos.
-  return items.sort((a, b) =>
+  return sortReminders(items)
+}
+
+// Avisos de seguro (vence hoy = vencido). Los usa el reporte semanal.
+export function computeInsuranceAlerts(vehicles: ReminderVehicle[], settings: ReminderSettings, today: string): ReminderItem[] {
+  const items: ReminderItem[] = []
+  for (const v of vehicles) {
+    if (!v.active || !v.insurance_expiry) continue
+    const remaining = daysBetween(today, v.insurance_expiry)
+    if (remaining <= settings.insurance_days_threshold) {
+      items.push({ vehicleId: v.id, vehicleName: v.name, plate: v.plate, kind: 'insurance', remaining, overdue: remaining <= 0, dueDate: v.insurance_expiry })
+    }
+  }
+  return sortReminders(items)
+}
+
+// Vencidos primero; dentro de cada grupo, por tipo (seguro, fecha, km), del más
+// urgente al menos, y por nombre del vehículo.
+export function sortReminders(items: ReminderItem[]): ReminderItem[] {
+  return [...items].sort((a, b) =>
     Number(b.overdue) - Number(a.overdue)
     || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind)
     || a.remaining - b.remaining
