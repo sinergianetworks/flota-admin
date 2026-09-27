@@ -79,7 +79,7 @@ export default function SettingsPage() {
     setSaving(true)
     const { data, error } = await supabase
       .from('fleet_settings')
-      .update({ ...values, email_reminders_enabled: enabled, updated_at: new Date().toISOString() })
+      .update({ ...values, email_reminders_enabled: enabled })
       .eq('id', true)
       .select('id')
     setSaving(false)
@@ -201,7 +201,7 @@ export default function SettingsPage() {
                 <span className="text-sm">
                   Enviar un resumen diario de vencimientos
                   <span className="block text-xs text-muted-foreground">
-                    Se envía a las 7:00 (hora local de la instalación) a todos los administradores activos y se
+                    Se envía a partir de las 7:00 (hora local de la instalación) a todos los administradores activos y se
                     repite cada día hasta que se actualice el dato. Los cambios hechos después de las 7:00 se
                     aplican desde mañana.
                   </span>

@@ -56,6 +56,9 @@ export function createHandler(deps: Deps = { now: () => new Date() }) {
 
     if (!test) {
       if (hourInTz(now, tz) < SEND_HOUR) return json({ skipped: 'hour', today })
+      // Sin Resend configurado los recordatorios están inactivos; no se
+      // reserva el día para no registrar errores cada hora.
+      if ((Deno.env.get('RESEND_API_KEY') ?? '').trim() === '') return json({ skipped: 'not_configured', today })
       // Reclama el día de forma atómica: true solo si no existía o quedó en error.
       // Un 'sending' colgado cuenta como "posiblemente enviado" y no se reintenta.
       const { data: claimed, error: cErr } = await db.rpc('flota_claim_reminder_day', { p_date: today })

@@ -123,6 +123,20 @@ Deno.test({ name: 'flujo de send-reminders', sanitizeOps: false, sanitizeResourc
       assertEquals(state.emails.length, 0)
     })
 
+    await t.step('sin RESEND_API_KEY: no hace nada y no registra', async () => {
+      resetState()
+      const saved = Deno.env.get('RESEND_API_KEY')
+      Deno.env.delete('RESEND_API_KEY')
+      try {
+        const res = await (await at(SIETE)(cron())).json()
+        assertEquals(res.skipped, 'not_configured')
+        assertEquals(state.emails.length, 0)
+        assertEquals(state.log.size, 0)
+      } finally {
+        if (saved !== undefined) Deno.env.set('RESEND_API_KEY', saved)
+      }
+    })
+
     await t.step('a las 7:10 envía un correo a todos los admins y lo registra', async () => {
       resetState()
       const res = await (await at(SIETE)(cron())).json()
